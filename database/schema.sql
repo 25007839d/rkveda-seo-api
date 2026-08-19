@@ -1,0 +1,12 @@
+CREATE DATABASE IF NOT EXISTS rkveda_seo;
+USE rkveda_seo;
+
+CREATE TABLE IF NOT EXISTS clients (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  business_name VARCHAR(255) NOT NULL,
+  website_url VARCHAR(500),
+  email VARCHAR(255),
+  phone VARCHAR(50),
+  city VARCHAR(100),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
