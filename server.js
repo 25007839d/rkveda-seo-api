@@ -5,11 +5,13 @@ const cors = require("cors");
 const db = require("./config/database");
 const authRoutes = require("./routes/auth.routes");
 const projectRoutes = require("./routes/project.routes");
+const keywordRoutes = require("./routes/keyword.routes");
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/projects", projectRoutes);
+app.use("/api", keywordRoutes);
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "RKVeda SEO API", version: "1.0.0" });
 });
