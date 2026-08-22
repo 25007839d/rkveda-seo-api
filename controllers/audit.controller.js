@@ -292,7 +292,8 @@ const createAudit = async (req, res) => {
             success: false,
 
             message:
-                "Internal server error"
+                "Internal server error",
+            error: error.message
 
         });
 
