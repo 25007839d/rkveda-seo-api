@@ -9,7 +9,7 @@ const keywordRoutes = require("./routes/keyword.routes");
 const rankingRoutes = require("./routes/ranking.routes");
 const auditRoutes = require("./routes/audit.routes");
 const competitorRoutes = require("./routes/competitor.routes");
-
+const backlinkRoutes = require("./routes/backlink.routes");
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -19,6 +19,7 @@ app.use("/api", keywordRoutes);
 app.use("/api", rankingRoutes);
 app.use("/api", auditRoutes);
 app.use("/api", competitorRoutes);
+app.use("/api", backlinkRoutes);
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "RKVeda SEO API", version: "1.0.0" });
 });
