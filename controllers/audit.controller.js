@@ -539,6 +539,11 @@ const getAuditForWorker = async (req, res) => {
 
         const audit_id = req.params.id;
 
+
+        // =====================================================
+        // 1. GET AUDIT SUMMARY
+        // =====================================================
+
         const [audits] =
             await db.execute(
                 `SELECT
@@ -577,12 +582,142 @@ const getAuditForWorker = async (req, res) => {
         }
 
 
+        const audit = audits[0];
+
+
+        // =====================================================
+        // 2. GET DETAILED AUDIT RESULT
+        // =====================================================
+
+        const [results] =
+            await db.execute(
+                `SELECT
+                    issues,
+                    warnings,
+                    passed,
+                    page_results,
+                    created_at AS result_created_at,
+                    updated_at AS result_updated_at
+                 FROM seo_audit_results
+                 WHERE audit_id = ?`,
+                [
+                    audit_id
+                ]
+            );
+
+
+        // =====================================================
+        // 3. DEFAULT EMPTY RESULT
+        // =====================================================
+
+        let detailedResult = {
+
+            issues: [],
+
+            warnings: [],
+
+            passed: [],
+
+            pageResults: []
+
+        };
+
+
+        // =====================================================
+        // 4. PARSE SAVED JSON
+        // =====================================================
+
+        if (results.length > 0) {
+
+            const result = results[0];
+
+
+            const parseJson = (value) => {
+
+                if (!value) {
+                    return [];
+                }
+
+
+                if (typeof value === "object") {
+                    return value;
+                }
+
+
+                try {
+
+                    return JSON.parse(value);
+
+                } catch (error) {
+
+                    console.error(
+                        "JSON parse error:",
+                        error
+                    );
+
+                    return [];
+
+                }
+
+            };
+
+
+            detailedResult = {
+
+                issues:
+                    parseJson(result.issues),
+
+                warnings:
+                    parseJson(result.warnings),
+
+                passed:
+                    parseJson(result.passed),
+
+                pageResults:
+                    parseJson(result.page_results),
+
+                result_created_at:
+                    result.result_created_at,
+
+                result_updated_at:
+                    result.result_updated_at
+
+            };
+
+        }
+
+
+        // =====================================================
+        // 5. COMBINE SUMMARY + DETAILS
+        // =====================================================
+
         return res.status(200).json({
 
             success: true,
 
-            audit:
-                audits[0]
+            audit: {
+
+                ...audit,
+
+                issues:
+                    detailedResult.issues,
+
+                warnings:
+                    detailedResult.warnings,
+
+                passed:
+                    detailedResult.passed,
+
+                pageResults:
+                    detailedResult.pageResults,
+
+                result_created_at:
+                    detailedResult.result_created_at || null,
+
+                result_updated_at:
+                    detailedResult.result_updated_at || null
+
+            }
 
         });
 
