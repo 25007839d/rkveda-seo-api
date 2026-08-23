@@ -2,21 +2,25 @@ name: SEO Audit Worker
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
+    inputs:
+      audit_id:
+        description: "SEO Audit ID"
+        required: true
+        type: string
 
 jobs:
   seo-audit:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -27,5 +31,7 @@ jobs:
 
       - name: Run SEO audit worker
         env:
+          AUDIT_ID: ${{ inputs.audit_id }}
           API_BASE_URL: https://api.rkveda.in
-        run: node services/seo/seoAuditService.js
+          WORKER_TOKEN: ${{ secrets.WORKER_TOKEN }}
+        run: node worker.js
