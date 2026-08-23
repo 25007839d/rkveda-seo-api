@@ -12,7 +12,9 @@ const {
 
     // Worker functions
     updateAuditStatus,
-    updateAuditResult
+    updateAuditResult,
+
+    getAuditForWorker
 
 } = require("../controllers/audit.controller");
 
@@ -23,6 +25,11 @@ const authMiddleware = require("../middleware/auth.middleware");
 // PROJECT AUDITS
 // =====================================================
 
+router.get(
+    "/worker/audits/:id",
+    workerAuthMiddleware,
+    getAuditForWorker
+);
 // Create audit for a project
 router.post(
     "/projects/:projectId/audits",

@@ -375,7 +375,84 @@ const getAuditById = async (req, res) => {
 
 };
 
+// =====================================================
+// WORKER - GET AUDIT
+// =====================================================
 
+const getAuditForWorker = async (req, res) => {
+
+    try {
+
+        const audit_id = req.params.id;
+
+        const [audits] =
+            await db.execute(
+                `SELECT
+                    a.id,
+                    a.project_id,
+                    p.website_url,
+                    a.score,
+                    a.pages_crawled,
+                    a.issues_count,
+                    a.warnings_count,
+                    a.audit_status,
+                    a.started_at,
+                    a.completed_at,
+                    a.created_at
+                 FROM seo_audits a
+                 INNER JOIN seo_projects p
+                     ON a.project_id = p.id
+                 WHERE a.id = ?`,
+                [
+                    audit_id
+                ]
+            );
+
+
+        if (audits.length === 0) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message:
+                    "Audit not found"
+
+            });
+
+        }
+
+
+        return res.status(200).json({
+
+            success: true,
+
+            audit:
+                audits[0]
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Get worker audit error:",
+            error
+        );
+
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                "Internal server error"
+
+        });
+
+    }
+
+};
 // =====================================================
 // UPDATE AUDIT
 // =====================================================
@@ -751,19 +828,14 @@ const updateAuditResult = async (req, res) => {
 // =====================================================
 
 module.exports = {
-
     createAudit,
-
     getAudits,
-
     getAuditById,
-
     updateAudit,
-
     deleteAudit,
 
     updateAuditStatus,
+    updateAuditResult,
 
-    updateAuditResult
-
+    getAuditForWorker
 };
