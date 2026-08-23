@@ -305,11 +305,16 @@ const getAuditById = async (req, res) => {
             req.params.id;
 
 
+        // =====================================================
+        // 1. GET AUDIT SUMMARY
+        // =====================================================
+
         const [audits] =
             await db.execute(
                 `SELECT
                     a.id,
                     a.project_id,
+                    p.website_url,
                     a.score,
                     a.pages_crawled,
                     a.issues_count,
@@ -344,12 +349,162 @@ const getAuditById = async (req, res) => {
         }
 
 
+        const audit =
+            audits[0];
+
+
+        // =====================================================
+        // 2. GET DETAILED AUDIT RESULT
+        // =====================================================
+
+        const [results] =
+            await db.execute(
+                `SELECT
+                    issues,
+                    warnings,
+                    passed,
+                    page_results,
+                    created_at,
+                    updated_at
+                 FROM seo_audit_results
+                 WHERE audit_id = ?`,
+                [
+                    audit_id
+                ]
+            );
+
+
+        // =====================================================
+        // 3. PARSE JSON STRINGS
+        // =====================================================
+
+        let details = {
+
+            issues: [],
+
+            warnings: [],
+
+            passed: [],
+
+            pageResults: []
+
+        };
+
+
+        if (results.length > 0) {
+
+            const result =
+                results[0];
+
+
+            try {
+
+                details.issues =
+                    result.issues
+                        ? JSON.parse(result.issues)
+                        : [];
+
+            } catch (error) {
+
+                console.error(
+                    "Failed to parse issues:",
+                    error
+                );
+
+            }
+
+
+            try {
+
+                details.warnings =
+                    result.warnings
+                        ? JSON.parse(result.warnings)
+                        : [];
+
+            } catch (error) {
+
+                console.error(
+                    "Failed to parse warnings:",
+                    error
+                );
+
+            }
+
+
+            try {
+
+                details.passed =
+                    result.passed
+                        ? JSON.parse(result.passed)
+                        : [];
+
+            } catch (error) {
+
+                console.error(
+                    "Failed to parse passed:",
+                    error
+                );
+
+            }
+
+
+            try {
+
+                details.pageResults =
+                    result.page_results
+                        ? JSON.parse(result.page_results)
+                        : [];
+
+            } catch (error) {
+
+                console.error(
+                    "Failed to parse page_results:",
+                    error
+                );
+
+            }
+
+
+            details.created_at =
+                result.created_at;
+
+            details.updated_at =
+                result.updated_at;
+
+        }
+
+
+        // =====================================================
+        // 4. COMBINE SUMMARY + DETAILS
+        // =====================================================
+
         return res.status(200).json({
 
             success: true,
 
-            audit:
-                audits[0]
+            audit: {
+
+                ...audit,
+
+                issues:
+                    details.issues,
+
+                warnings:
+                    details.warnings,
+
+                passed:
+                    details.passed,
+
+                pageResults:
+                    details.pageResults,
+
+                result_created_at:
+                    details.created_at || null,
+
+                result_updated_at:
+                    details.updated_at || null
+
+            }
 
         });
 
@@ -374,7 +529,6 @@ const getAuditById = async (req, res) => {
     }
 
 };
-
 // =====================================================
 // WORKER - GET AUDIT
 // =====================================================
