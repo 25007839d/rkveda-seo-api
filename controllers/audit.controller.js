@@ -298,41 +298,37 @@ const getAuditById = async (req, res) => {
 
     try {
 
-        const user_id =
-            req.user.userId;
-
-        const audit_id =
-            req.params.id;
+        const user_id = req.user.userId;
+        const audit_id = req.params.id;
 
 
         // =====================================================
         // 1. GET AUDIT SUMMARY
         // =====================================================
 
-        const [audits] =
-            await db.execute(
-                `SELECT
-                    a.id,
-                    a.project_id,
-                    p.website_url,
-                    a.score,
-                    a.pages_crawled,
-                    a.issues_count,
-                    a.warnings_count,
-                    a.audit_status,
-                    a.started_at,
-                    a.completed_at,
-                    a.created_at
-                 FROM seo_audits a
-                 INNER JOIN seo_projects p
-                     ON a.project_id = p.id
-                 WHERE a.id = ?
-                   AND p.user_id = ?`,
-                [
-                    audit_id,
-                    user_id
-                ]
-            );
+        const [audits] = await db.execute(
+            `SELECT
+                a.id,
+                a.project_id,
+                p.website_url,
+                a.score,
+                a.pages_crawled,
+                a.issues_count,
+                a.warnings_count,
+                a.audit_status,
+                a.started_at,
+                a.completed_at,
+                a.created_at
+             FROM seo_audits a
+             INNER JOIN seo_projects p
+                 ON a.project_id = p.id
+             WHERE a.id = ?
+               AND p.user_id = ?`,
+            [
+                audit_id,
+                user_id
+            ]
+        );
 
 
         if (audits.length === 0) {
@@ -341,44 +337,41 @@ const getAuditById = async (req, res) => {
 
                 success: false,
 
-                message:
-                    "Audit not found"
+                message: "Audit not found"
 
             });
 
         }
 
 
-        const audit =
-            audits[0];
+        const audit = audits[0];
 
 
         // =====================================================
-        // 2. GET DETAILED AUDIT RESULT
+        // 2. GET DETAILED RESULT
         // =====================================================
 
-        const [results] =
-            await db.execute(
-                `SELECT
-                    issues,
-                    warnings,
-                    passed,
-                    page_results,
-                    created_at,
-                    updated_at
-                 FROM seo_audit_results
-                 WHERE audit_id = ?`,
-                [
-                    audit_id
-                ]
-            );
+        const [results] = await db.execute(
+            `SELECT
+                issues,
+                warnings,
+                passed,
+                page_results,
+                created_at AS result_created_at,
+                updated_at AS result_updated_at
+             FROM seo_audit_results
+             WHERE audit_id = ?`,
+            [
+                audit_id
+            ]
+        );
 
 
         // =====================================================
-        // 3. PARSE JSON STRINGS
+        // 3. DEFAULT RESULT
         // =====================================================
 
-        let details = {
+        let detailedResult = {
 
             issues: [],
 
@@ -386,96 +379,81 @@ const getAuditById = async (req, res) => {
 
             passed: [],
 
-            pageResults: []
+            pageResults: [],
+
+            result_created_at: null,
+
+            result_updated_at: null
 
         };
 
 
+        // =====================================================
+        // 4. PARSE JSON
+        // =====================================================
+
         if (results.length > 0) {
 
-            const result =
-                results[0];
+            const result = results[0];
 
 
-            try {
+            const parseJson = (value) => {
 
-                details.issues =
-                    result.issues
-                        ? JSON.parse(result.issues)
-                        : [];
-
-            } catch (error) {
-
-                console.error(
-                    "Failed to parse issues:",
-                    error
-                );
-
-            }
+                if (!value) {
+                    return [];
+                }
 
 
-            try {
-
-                details.warnings =
-                    result.warnings
-                        ? JSON.parse(result.warnings)
-                        : [];
-
-            } catch (error) {
-
-                console.error(
-                    "Failed to parse warnings:",
-                    error
-                );
-
-            }
+                if (typeof value === "object") {
+                    return value;
+                }
 
 
-            try {
+                try {
 
-                details.passed =
-                    result.passed
-                        ? JSON.parse(result.passed)
-                        : [];
+                    return JSON.parse(value);
 
-            } catch (error) {
+                } catch (error) {
 
-                console.error(
-                    "Failed to parse passed:",
-                    error
-                );
+                    console.error(
+                        "Audit JSON parse error:",
+                        error
+                    );
 
-            }
+                    return [];
 
+                }
 
-            try {
-
-                details.pageResults =
-                    result.page_results
-                        ? JSON.parse(result.page_results)
-                        : [];
-
-            } catch (error) {
-
-                console.error(
-                    "Failed to parse page_results:",
-                    error
-                );
-
-            }
+            };
 
 
-            details.created_at =
-                result.created_at;
+            detailedResult = {
 
-            details.updated_at =
-                result.updated_at;
+                issues:
+                    parseJson(result.issues),
+
+                warnings:
+                    parseJson(result.warnings),
+
+                passed:
+                    parseJson(result.passed),
+
+                pageResults:
+                    parseJson(result.page_results),
+
+                result_created_at:
+                    result.result_created_at,
+
+                result_updated_at:
+                    result.result_updated_at
+
+            };
 
         }
 
 
         // =====================================================
-        // 4. COMBINE SUMMARY + DETAILS
+        // 5. RETURN COMPLETE AUDIT
         // =====================================================
 
         return res.status(200).json({
@@ -487,22 +465,22 @@ const getAuditById = async (req, res) => {
                 ...audit,
 
                 issues:
-                    details.issues,
+                    detailedResult.issues,
 
                 warnings:
-                    details.warnings,
+                    detailedResult.warnings,
 
                 passed:
-                    details.passed,
+                    detailedResult.passed,
 
                 pageResults:
-                    details.pageResults,
+                    detailedResult.pageResults,
 
                 result_created_at:
-                    details.created_at || null,
+                    detailedResult.result_created_at,
 
                 result_updated_at:
-                    details.updated_at || null
+                    detailedResult.result_updated_at
 
             }
 
@@ -521,8 +499,7 @@ const getAuditById = async (req, res) => {
 
             success: false,
 
-            message:
-                "Internal server error"
+            message: "Internal server error"
 
         });
 
