@@ -730,7 +730,7 @@ const updateAuditResult = async (req, res) => {
 
     try {
 
-        const audit_id = req.params.id;
+        const auditId = req.params.id;
 
         const {
             score,
@@ -740,11 +740,16 @@ const updateAuditResult = async (req, res) => {
             audit_status,
             started_at,
             completed_at,
+            audit_result,
             error
         } = req.body;
 
 
-        const [result] = await db.execute(
+        // =====================================================
+        // 1. UPDATE AUDIT SUMMARY
+        // =====================================================
+
+        await db.execute(
             `UPDATE seo_audits
              SET
                 score = ?,
@@ -756,46 +761,85 @@ const updateAuditResult = async (req, res) => {
                 completed_at = ?
              WHERE id = ?`,
             [
-
                 score ?? 0,
-
                 pages_crawled ?? 0,
-
                 issues_count ?? 0,
-
                 warnings_count ?? 0,
-
                 audit_status || "completed",
-
                 started_at || null,
-
-                completed_at || new Date(),
-
-                audit_id
-
+                completed_at || null,
+                auditId
             ]
         );
 
 
-        if (result.affectedRows === 0) {
+        // =====================================================
+        // 2. SAVE DETAILED AUDIT RESULT
+        // =====================================================
 
-            return res.status(404).json({
+        if (audit_result) {
 
-                success: false,
+            const issues =
+                audit_result.issues || [];
 
-                message: "Audit not found"
+            const warnings =
+                audit_result.warnings || [];
 
-            });
+            const passed =
+                audit_result.passed || [];
+
+            const pageResults =
+                audit_result.pageResults || [];
+
+
+            await db.execute(
+                `INSERT INTO seo_audit_results
+                (
+                    audit_id,
+                    issues,
+                    warnings,
+                    passed,
+                    page_results
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    issues = VALUES(issues),
+                    warnings = VALUES(warnings),
+                    passed = VALUES(passed),
+                    page_results = VALUES(page_results),
+                    updated_at = CURRENT_TIMESTAMP`,
+                [
+                    auditId,
+
+                    JSON.stringify(issues),
+
+                    JSON.stringify(warnings),
+
+                    JSON.stringify(passed),
+
+                    JSON.stringify(pageResults)
+                ]
+            );
 
         }
 
+
+        // =====================================================
+        // 3. RESPONSE
+        // =====================================================
 
         return res.status(200).json({
 
             success: true,
 
             message:
-                "Audit result updated successfully"
+                "Audit result updated successfully",
+
+            audit_id:
+                auditId,
+
+            audit_status:
+                audit_status || "completed"
 
         });
 
@@ -813,10 +857,7 @@ const updateAuditResult = async (req, res) => {
             success: false,
 
             message:
-                "Failed to update audit result",
-
-            error:
-                error.message
+                "Internal server error"
 
         });
 
