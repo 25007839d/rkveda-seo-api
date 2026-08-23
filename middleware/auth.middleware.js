@@ -1,110 +1,35 @@
-const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
 
-const workerAuthMiddleware = (req, res, next) => {
-
+const authMiddleware = (req, res, next) => {
     try {
+        const authHeader = req.headers.authorization;
 
-        const authHeader =
-            req.headers.authorization;
-
-
-        if (
-            !authHeader ||
-            !authHeader.startsWith("Bearer ")
-        ) {
-
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
             return res.status(401).json({
-
                 success: false,
-
-                message:
-                    "Worker authorization token required"
-
+                message: "Authorization token required"
             });
-
         }
 
+        const token = authHeader.split(" ")[1];
 
-        const token =
-            authHeader.substring(7);
+        const decoded = jwt.verify(
+            token,
+            process.env.JWT_SECRET
+        );
 
-
-        const workerToken =
-            process.env.WORKER_TOKEN;
-
-
-        if (!workerToken) {
-
-            console.error(
-                "WORKER_TOKEN is not configured"
-            );
-
-            return res.status(500).json({
-
-                success: false,
-
-                message:
-                    "Worker authentication is not configured"
-
-            });
-
-        }
-
-
-        const tokenBuffer =
-            Buffer.from(token);
-
-        const workerTokenBuffer =
-            Buffer.from(workerToken);
-
-
-        if (
-            tokenBuffer.length !==
-            workerTokenBuffer.length ||
-            !crypto.timingSafeEqual(
-                tokenBuffer,
-                workerTokenBuffer
-            )
-        ) {
-
-            return res.status(401).json({
-
-                success: false,
-
-                message:
-                    "Invalid worker token"
-
-            });
-
-        }
-
-
-        req.worker = true;
+        req.user = decoded;
 
         next();
 
-
     } catch (error) {
 
-        console.error(
-            "Worker authentication error:",
-            error
-        );
-
-
         return res.status(401).json({
-
             success: false,
-
-            message:
-                "Worker authentication failed"
-
+            message: "Invalid or expired token"
         });
 
     }
-
 };
 
-
-module.exports =
-    workerAuthMiddleware;
+module.exports = authMiddleware;
