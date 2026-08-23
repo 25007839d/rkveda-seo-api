@@ -802,6 +802,10 @@ const deleteAudit = async (req, res) => {
 // WORKER - UPDATE AUDIT STATUS
 // =====================================================
 
+// =====================================================
+// WORKER - UPDATE AUDIT STATUS
+// =====================================================
+
 const updateAuditStatus = async (req, res) => {
 
     try {
@@ -814,19 +818,54 @@ const updateAuditStatus = async (req, res) => {
         } = req.body;
 
 
-        const [result] = await db.execute(
-            `UPDATE seo_audits
-             SET
-                audit_status = ?,
-                started_at = ?
-             WHERE id = ?`,
-            [
-                audit_status,
-                started_at || new Date(),
-                audit_id
-            ]
-        );
+        // ---------------------------------------------
+        // Validate status
+        // ---------------------------------------------
 
+        const allowedStatuses = [
+            "pending",
+            "running",
+            "completed",
+            "failed"
+        ];
+
+
+        if (!allowedStatuses.includes(audit_status)) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    "Invalid audit status"
+
+            });
+
+        }
+
+
+        // ---------------------------------------------
+        // Update audit
+        // ---------------------------------------------
+
+        const [result] =
+            await db.execute(
+                `UPDATE seo_audits
+                 SET
+                    audit_status = ?,
+                    started_at = ?
+                 WHERE id = ?`,
+                [
+                    audit_status,
+                    started_at || new Date(),
+                    audit_id
+                ]
+            );
+
+
+        // ---------------------------------------------
+        // Audit not found
+        // ---------------------------------------------
 
         if (result.affectedRows === 0) {
 
@@ -834,7 +873,8 @@ const updateAuditStatus = async (req, res) => {
 
                 success: false,
 
-                message: "Audit not found"
+                message:
+                    "Audit not found"
 
             });
 
@@ -846,7 +886,11 @@ const updateAuditStatus = async (req, res) => {
             success: true,
 
             message:
-                "Audit status updated successfully"
+                "Audit status updated successfully",
+
+            audit_id,
+
+            audit_status
 
         });
 
@@ -874,8 +918,6 @@ const updateAuditStatus = async (req, res) => {
     }
 
 };
-
-
 // =====================================================
 // WORKER - UPDATE AUDIT RESULT
 // =====================================================

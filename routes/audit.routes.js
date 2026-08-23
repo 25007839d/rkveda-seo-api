@@ -8,8 +8,11 @@ const {
     getAuditById,
     updateAudit,
     deleteAudit,
+
+    getAuditForWorker,
     updateAuditStatus,
     updateAuditResult
+
 } = require("../controllers/audit.controller");
 
 const authMiddleware =
@@ -20,7 +23,7 @@ const workerAuthMiddleware =
 
 
 // =====================================================
-// USER / PROJECT AUDITS
+// USER APIs
 // =====================================================
 
 router.post(
@@ -34,11 +37,6 @@ router.get(
     authMiddleware,
     getAudits
 );
-
-
-// =====================================================
-// USER SINGLE AUDIT
-// =====================================================
 
 router.get(
     "/audits/:id",
@@ -60,23 +58,23 @@ router.delete(
 
 
 // =====================================================
-// WORKER AUDIT ENDPOINTS
+// WORKER APIs
 // =====================================================
 
 router.get(
     "/worker/audits/:id",
     workerAuthMiddleware,
-    getAuditById
+    getAuditForWorker
 );
 
 router.put(
-    "/worker/audits/:id/status",
+    "/audits/:id/status",
     workerAuthMiddleware,
     updateAuditStatus
 );
 
 router.put(
-    "/worker/audits/:id/result",
+    "/audits/:id/result",
     workerAuthMiddleware,
     updateAuditResult
 );
