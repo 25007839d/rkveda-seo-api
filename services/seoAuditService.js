@@ -1,51 +1,361 @@
-const db = require("../config/database");
-
 const {
     runAudit
 } = require("./seo/audit.service");
 
 
 // =====================================================
+// CONFIGURATION
+// =====================================================
+
+const API_BASE_URL =
+    process.env.API_BASE_URL ||
+    "https://api.rkveda.in";
+
+const WORKER_TOKEN =
+    process.env.WORKER_TOKEN;
+
+
+// =====================================================
+// VALIDATE CONFIGURATION
+// =====================================================
+
+if (!WORKER_TOKEN) {
+
+    console.error(
+        "ERROR: WORKER_TOKEN environment variable is required"
+    );
+
+}
+
+
+// =====================================================
+// API REQUEST HELPER
+// =====================================================
+
+const apiRequest = async (
+    endpoint,
+    options = {}
+) => {
+
+    if (!WORKER_TOKEN) {
+
+        throw new Error(
+            "WORKER_TOKEN environment variable is not configured"
+        );
+
+    }
+
+
+    const url =
+        `${API_BASE_URL}${endpoint}`;
+
+
+    const headers = {
+
+        "Content-Type":
+            "application/json",
+
+        ...(options.headers || {}),
+
+        Authorization:
+            `Bearer ${WORKER_TOKEN}`
+
+    };
+
+
+    console.log(
+        `${options.method || "GET"} ${url}`
+    );
+
+
+    const response =
+        await fetch(
+            url,
+            {
+                ...options,
+                headers
+            }
+        );
+
+
+    const text =
+        await response.text();
+
+
+    let data;
+
+
+    try {
+
+        data =
+            text
+                ? JSON.parse(text)
+                : {};
+
+    } catch {
+
+        data = {
+
+            success: false,
+
+            message: text
+
+        };
+
+    }
+
+
+    if (!response.ok) {
+
+        throw new Error(
+
+            data.error ||
+
+            data.message ||
+
+            `API request failed: ${response.status}`
+
+        );
+
+    }
+
+
+    return data;
+
+};
+
+
+// =====================================================
+// GET AUDIT
+// =====================================================
+
+const getAudit = async (
+    auditId
+) => {
+
+    console.log(
+        `Getting audit ${auditId} from API...`
+    );
+
+
+    const result =
+        await apiRequest(
+            `/api/audits/${auditId}`,
+            {
+                method: "GET"
+            }
+        );
+
+
+    if (
+        !result.success ||
+        !result.audit
+    ) {
+
+        throw new Error(
+            `Audit ${auditId} not found`
+        );
+
+    }
+
+
+    return result.audit;
+
+};
+
+
+// =====================================================
+// MARK AUDIT RUNNING
+// =====================================================
+
+const markAuditRunning = async (
+    auditId
+) => {
+
+    console.log(
+        `Marking audit ${auditId} as running...`
+    );
+
+
+    return await apiRequest(
+        `/api/audits/${auditId}/status`,
+        {
+
+            method: "PUT",
+
+            body: JSON.stringify({
+
+                audit_status:
+                    "running",
+
+                started_at:
+                    new Date().toISOString()
+
+            })
+
+        }
+    );
+
+};
+
+
+// =====================================================
+// UPDATE AUDIT SUCCESS
+// =====================================================
+
+const updateAuditCompleted = async (
+    auditId,
+    result
+) => {
+
+    console.log(
+        `Updating audit ${auditId} with results...`
+    );
+
+
+    return await apiRequest(
+        `/api/audits/${auditId}/result`,
+        {
+
+            method: "PUT",
+
+            body: JSON.stringify({
+
+                score:
+                    result.score || 0,
+
+                pages_crawled:
+                    result.pagesCrawled || 0,
+
+                issues_count:
+                    result.issuesCount || 0,
+
+                warnings_count:
+                    result.warningsCount || 0,
+
+                audit_status:
+                    "completed",
+
+                started_at:
+                    result.startedAt ||
+                    new Date().toISOString(),
+
+                completed_at:
+                    result.completedAt ||
+                    new Date().toISOString(),
+
+                audit_result:
+                    result
+
+            })
+
+        }
+    );
+
+};
+
+
+// =====================================================
+// UPDATE AUDIT FAILED
+// =====================================================
+
+const updateAuditFailed = async (
+    auditId,
+    error
+) => {
+
+    console.log(
+        `Marking audit ${auditId} as failed...`
+    );
+
+
+    try {
+
+        await apiRequest(
+            `/api/audits/${auditId}/result`,
+            {
+
+                method: "PUT",
+
+                body: JSON.stringify({
+
+                    audit_status:
+                        "failed",
+
+                    completed_at:
+                        new Date().toISOString(),
+
+                    error:
+                        error.message ||
+                        String(error)
+
+                })
+
+            }
+        );
+
+
+        console.log(
+            `Audit ${auditId} marked as failed`
+        );
+
+
+    } catch (updateError) {
+
+        console.error(
+            "Failed to update audit failure status:"
+        );
+
+        console.error(
+            updateError
+        );
+
+    }
+
+};
+
+
+// =====================================================
 // RUN SEO AUDIT
 // =====================================================
 
-const processAudit = async (auditId) => {
+const processAudit = async (
+    auditId
+) => {
 
-    console.log("====================================");
-    console.log("SEO AUDIT WORKER STARTED");
-    console.log("Audit ID:", auditId);
-    console.log("====================================");
+    console.log(
+        "===================================="
+    );
+
+    console.log(
+        "SEO AUDIT WORKER STARTED"
+    );
+
+    console.log(
+        "Audit ID:",
+        auditId
+    );
+
+    console.log(
+        "API:",
+        API_BASE_URL
+    );
+
+    console.log(
+        "===================================="
+    );
 
 
     try {
 
         // ---------------------------------------------
-        // 1. Get audit + project
+        // 1. Get audit from API
         // ---------------------------------------------
 
-        const [rows] = await db.execute(
-            `SELECT
-                a.id AS audit_id,
-                a.project_id,
-                p.website_url
-             FROM seo_audits a
-             INNER JOIN seo_projects p
-                 ON a.project_id = p.id
-             WHERE a.id = ?`,
-            [auditId]
-        );
-
-
-        if (rows.length === 0) {
-
-            throw new Error(
-                `Audit ${auditId} not found`
+        const audit =
+            await getAudit(
+                auditId
             );
-
-        }
-
-
-        const audit = rows[0];
 
 
         console.log(
@@ -58,16 +368,8 @@ const processAudit = async (auditId) => {
         // 2. Mark audit as running
         // ---------------------------------------------
 
-        await db.execute(
-            `UPDATE seo_audits
-             SET
-                audit_status = 'running',
-                started_at = ?
-             WHERE id = ?`,
-            [
-                new Date(),
-                auditId
-            ]
+        await markAuditRunning(
+            auditId
         );
 
 
@@ -103,7 +405,11 @@ const processAudit = async (auditId) => {
 
 
         console.log(
-            "Audit result:",
+            "Audit result:"
+        );
+
+
+        console.log(
             JSON.stringify(
                 result,
                 null,
@@ -118,25 +424,20 @@ const processAudit = async (auditId) => {
 
         if (!result.success) {
 
-            await db.execute(
-                `UPDATE seo_audits
-                 SET
-                    audit_status = 'failed',
-                    started_at = ?,
-                    completed_at = ?
-                 WHERE id = ?`,
-                [
-                    result.startedAt || new Date(),
-                    result.completedAt || new Date(),
-                    auditId
-                ]
+            const auditError =
+                new Error(
+                    result.error ||
+                    "SEO audit failed"
+                );
+
+
+            await updateAuditFailed(
+                auditId,
+                auditError
             );
 
 
-            throw new Error(
-                result.error ||
-                "SEO audit failed"
-            );
+            throw auditError;
 
         }
 
@@ -145,36 +446,15 @@ const processAudit = async (auditId) => {
         // 6. Update successful audit
         // ---------------------------------------------
 
-        await db.execute(
-            `UPDATE seo_audits
-             SET
-                score = ?,
-                pages_crawled = ?,
-                issues_count = ?,
-                warnings_count = ?,
-                audit_status = 'completed',
-                started_at = ?,
-                completed_at = ?
-             WHERE id = ?`,
-            [
-
-                result.score || 0,
-
-                result.pagesCrawled || 0,
-
-                result.issuesCount || 0,
-
-                result.warningsCount || 0,
-
-                result.startedAt || new Date(),
-
-                result.completedAt || new Date(),
-
-                auditId
-
-            ]
+        await updateAuditCompleted(
+            auditId,
+            result
         );
 
+
+        // ---------------------------------------------
+        // 7. Success
+        // ---------------------------------------------
 
         console.log(
             "===================================="
@@ -210,12 +490,14 @@ const processAudit = async (auditId) => {
         );
 
         console.log(
-            "====================================");
+            "===================================="
+        );
 
 
         return {
 
-            success: true,
+            success:
+                true,
 
             auditId,
 
@@ -236,7 +518,6 @@ const processAudit = async (auditId) => {
 
     } catch (error) {
 
-
         console.error(
             "SEO AUDIT WORKER ERROR:"
         );
@@ -246,32 +527,20 @@ const processAudit = async (auditId) => {
         );
 
 
-        // ---------------------------------------------
-        // Mark audit failed
-        // ---------------------------------------------
+        /*
+         * If the failure happened after the audit
+         * was already marked failed above, this will
+         * safely attempt the update again.
+         *
+         * updateAuditFailed() itself catches API
+         * update errors, so the original error remains
+         * the main worker error.
+         */
 
-        try {
-
-            await db.execute(
-                `UPDATE seo_audits
-                 SET
-                    audit_status = 'failed',
-                    completed_at = ?
-                 WHERE id = ?`,
-                [
-                    new Date(),
-                    auditId
-                ]
-            );
-
-        } catch (dbError) {
-
-            console.error(
-                "Failed to update audit status:",
-                dbError
-            );
-
-        }
+        await updateAuditFailed(
+            auditId,
+            error
+        );
 
 
         throw error;
@@ -281,6 +550,12 @@ const processAudit = async (auditId) => {
 };
 
 
+// =====================================================
+// EXPORT
+// =====================================================
+
 module.exports = {
+
     processAudit
+
 };

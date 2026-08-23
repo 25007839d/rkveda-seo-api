@@ -567,7 +567,185 @@ const deleteAudit = async (req, res) => {
 
 };
 
+// =====================================================
+// WORKER - UPDATE AUDIT STATUS
+// =====================================================
 
+const updateAuditStatus = async (req, res) => {
+
+    try {
+
+        const audit_id = req.params.id;
+
+        const {
+            audit_status,
+            started_at
+        } = req.body;
+
+
+        const [result] = await db.execute(
+            `UPDATE seo_audits
+             SET
+                audit_status = ?,
+                started_at = ?
+             WHERE id = ?`,
+            [
+                audit_status,
+                started_at || new Date(),
+                audit_id
+            ]
+        );
+
+
+        if (result.affectedRows === 0) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message: "Audit not found"
+
+            });
+
+        }
+
+
+        return res.status(200).json({
+
+            success: true,
+
+            message:
+                "Audit status updated successfully"
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Update audit status error:",
+            error
+        );
+
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                "Failed to update audit status",
+
+            error:
+                error.message
+
+        });
+
+    }
+
+};
+
+
+// =====================================================
+// WORKER - UPDATE AUDIT RESULT
+// =====================================================
+
+const updateAuditResult = async (req, res) => {
+
+    try {
+
+        const audit_id = req.params.id;
+
+        const {
+            score,
+            pages_crawled,
+            issues_count,
+            warnings_count,
+            audit_status,
+            started_at,
+            completed_at,
+            error
+        } = req.body;
+
+
+        const [result] = await db.execute(
+            `UPDATE seo_audits
+             SET
+                score = ?,
+                pages_crawled = ?,
+                issues_count = ?,
+                warnings_count = ?,
+                audit_status = ?,
+                started_at = ?,
+                completed_at = ?
+             WHERE id = ?`,
+            [
+
+                score ?? 0,
+
+                pages_crawled ?? 0,
+
+                issues_count ?? 0,
+
+                warnings_count ?? 0,
+
+                audit_status || "completed",
+
+                started_at || null,
+
+                completed_at || new Date(),
+
+                audit_id
+
+            ]
+        );
+
+
+        if (result.affectedRows === 0) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message: "Audit not found"
+
+            });
+
+        }
+
+
+        return res.status(200).json({
+
+            success: true,
+
+            message:
+                "Audit result updated successfully"
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Update audit result error:",
+            error
+        );
+
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                "Failed to update audit result",
+
+            error:
+                error.message
+
+        });
+
+    }
+
+};
 // =====================================================
 // EXPORT
 // =====================================================
@@ -582,6 +760,10 @@ module.exports = {
 
     updateAudit,
 
-    deleteAudit
+    deleteAudit,
+
+    updateAuditStatus,
+
+    updateAuditResult
 
 };

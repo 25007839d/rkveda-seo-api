@@ -3,14 +3,35 @@ const {
 } = require("./services/seoAuditService");
 
 
+// ---------------------------------------------
+// Get Audit ID
+// ---------------------------------------------
+
 const auditId =
-    process.env.AUDIT_ID;
+    process.env.AUDIT_ID ||
+    process.argv[2];
 
 
 if (!auditId) {
 
     console.error(
-        "AUDIT_ID environment variable is required"
+        "AUDIT_ID is required"
+    );
+
+    console.error(
+        "Usage:"
+    );
+
+    console.error(
+        "  AUDIT_ID=20 node worker.js"
+    );
+
+    console.error(
+        "or"
+    );
+
+    console.error(
+        "  node worker.js 20"
     );
 
     process.exit(1);
@@ -18,8 +39,16 @@ if (!auditId) {
 }
 
 
+// ---------------------------------------------
+// Start worker
+// ---------------------------------------------
+
 console.log(
-    "Starting SEO audit worker"
+    "===================================="
+);
+
+console.log(
+    "SEO AUDIT WORKER STARTED"
 );
 
 console.log(
@@ -27,12 +56,25 @@ console.log(
     auditId
 );
 
+console.log(
+    "===================================="
+);
+
+
+// ---------------------------------------------
+// Process audit
+// ---------------------------------------------
 
 processAudit(auditId)
+
     .then((result) => {
 
         console.log(
-            "Worker completed successfully"
+            "===================================="
+        );
+
+        console.log(
+            "WORKER COMPLETED SUCCESSFULLY"
         );
 
         console.log(
@@ -43,17 +85,30 @@ processAudit(auditId)
             )
         );
 
+        console.log(
+            "===================================="
+        );
+
         process.exit(0);
 
     })
+
     .catch((error) => {
 
         console.error(
-            "Worker failed"
+            "===================================="
+        );
+
+        console.error(
+            "WORKER FAILED"
         );
 
         console.error(
             error
+        );
+
+        console.error(
+            "===================================="
         );
 
         process.exit(1);
