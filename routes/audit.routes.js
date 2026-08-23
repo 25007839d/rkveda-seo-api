@@ -50,6 +50,12 @@ router.get(
     getAuditById
 );
 
+// Worker gets audit
+router.get(
+    "/worker/audits/:id",
+    workerAuthMiddleware,
+    getAuditById
+);
 
 // Update audit
 router.put(

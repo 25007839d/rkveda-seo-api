@@ -140,7 +140,7 @@ const getAudit = async (
 
     const result =
         await apiRequest(
-            `/api/audits/${auditId}`,
+            `/api/worker/audits/${auditId}`,
             {
                 method: "GET"
             }
