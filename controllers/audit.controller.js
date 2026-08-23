@@ -1,12 +1,8 @@
 const db = require("../config/database");
 
-const {
-    runAudit
-} = require("../services/seo/audit.service");
-
 
 // =====================================================
-// CREATE + RUN AUDIT
+// CREATE AUDIT
 // =====================================================
 
 const createAudit = async (req, res) => {
@@ -94,155 +90,42 @@ const createAudit = async (req, res) => {
 
 
         // ---------------------------------------------
-        // 3. Run SEO audit
+        // 3. Do NOT run Playwright here
+        //
+        // The actual SEO audit will be executed
+        // by GitHub Actions.
         // ---------------------------------------------
-
-        console.log(
-            `Starting audit ${auditId}...`
-        );
-
-
-        const auditResult =
-            await runAudit(
-                project,
-                2
-            );
-
-
-        // ---------------------------------------------
-        // 4. Handle audit failure
-        // ---------------------------------------------
-
-        if (
-            !auditResult.success
-        ) {
-
-            await db.execute(
-                `UPDATE seo_audits
-                 SET
-                    audit_status = 'failed',
-                    started_at = ?,
-                    completed_at = ?
-                 WHERE id = ?`,
-                [
-                    auditResult.startedAt || new Date(),
-                    auditResult.completedAt || new Date(),
-                    auditId
-                ]
-            );
-
-
-            return res.status(500).json({
-
-                success: false,
-
-                message:
-                    "SEO audit failed",
-
-                audit: {
-
-                    id:
-                        auditId,
-
-                    project_id,
-
-                    audit_status:
-                        "failed",
-
-                    error:
-                        auditResult.error
-
-                }
-
-            });
-
-        }
-
-
-        // ---------------------------------------------
-        // 5. Update audit summary
-        // ---------------------------------------------
-
-        await db.execute(
-            `UPDATE seo_audits
-             SET
-                score = ?,
-                pages_crawled = ?,
-                issues_count = ?,
-                warnings_count = ?,
-                audit_status = ?,
-                started_at = ?,
-                completed_at = ?
-             WHERE id = ?`,
-            [
-                auditResult.score ?? 0,
-
-                auditResult.pagesCrawled ?? 0,
-
-                auditResult.issuesCount ?? 0,
-
-                auditResult.warningsCount ?? 0,
-
-                auditResult.auditStatus || "completed",
-
-                auditResult.startedAt || null,
-
-                auditResult.completedAt || null,
-
-                auditId
-            ]
-        );
-
-
-        // ---------------------------------------------
-        // 6. Return result
-        // ---------------------------------------------
-
-        console.log(
-            `Audit ${auditId} completed.`
-        );
-
 
         return res.status(201).json({
 
             success: true,
 
             message:
-                "SEO audit completed successfully",
+                "SEO audit queued successfully",
 
             audit: {
 
                 id:
                     auditId,
 
-                project_id,
+                project_id:
+                    project_id,
 
-                score:
-                    auditResult.score,
+                website_url:
+                    project.website_url,
 
-                pages_crawled:
-                    auditResult.pagesCrawled,
+                score: 0,
 
-                issues_count:
-                    auditResult.issuesCount,
+                pages_crawled: 0,
 
-                warnings_count:
-                    auditResult.warningsCount,
+                issues_count: 0,
+
+                warnings_count: 0,
 
                 audit_status:
-                    auditResult.auditStatus,
+                    "pending"
 
-                started_at:
-                    auditResult.startedAt,
-
-                completed_at:
-                    auditResult.completedAt
-
-            },
-
-            // Temporary API response.
-            // We will optimize this later.
-            result: auditResult
+            }
 
         });
 
@@ -256,7 +139,7 @@ const createAudit = async (req, res) => {
 
 
         // ---------------------------------------------
-        // Mark audit failed if it was created
+        // Mark audit failed if DB record was created
         // ---------------------------------------------
 
         if (auditId) {
@@ -274,6 +157,7 @@ const createAudit = async (req, res) => {
                         auditId
                     ]
                 );
+
 
             } catch (updateError) {
 
@@ -293,7 +177,9 @@ const createAudit = async (req, res) => {
 
             message:
                 "Internal server error",
-            error: error.message
+
+            error:
+                error.message
 
         });
 
@@ -317,7 +203,9 @@ const getAudits = async (req, res) => {
             req.params.projectId;
 
 
+        // ---------------------------------------------
         // Verify project ownership
+        // ---------------------------------------------
 
         const [projects] =
             await db.execute(
@@ -538,11 +426,14 @@ const updateAudit = async (req, res) => {
 
                     warnings_count ?? 0,
 
-                    audit_status || "pending",
+                    audit_status ||
+                        "pending",
 
-                    started_at || null,
+                    started_at ||
+                        null,
 
-                    completed_at || null,
+                    completed_at ||
+                        null,
 
                     audit_id,
 
@@ -676,6 +567,10 @@ const deleteAudit = async (req, res) => {
 
 };
 
+
+// =====================================================
+// EXPORT
+// =====================================================
 
 module.exports = {
 
