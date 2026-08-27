@@ -1092,3 +1092,17 @@ Advanced SEO checks
 
 **Next frontend task:** create separate `rkveda-seo-frontend` repository and connect it to `https://api.rkveda.in`.
 
+| Module                     | API needed                               | Current |
+| -------------------------- | ---------------------------------------- | ------- |
+| 🔐 Authentication          | Register/Login/Profile                   | ✅       |
+| 🌐 Projects/Websites       | CRUD projects                            | ✅       |
+| 🔍 Technical SEO           | Audit/Crawler/Issues                     | ✅       |
+| 📊 SEO Dashboard           | Summary/KPIs                             | ❌       |
+| 🔎 Google Search Console   | Search/query/page data                   | ❌       |
+| 📈 Google Analytics        | Traffic/conversions                      | ❌       |
+| 📍 Google Business Profile | GBP/reviews/photos/posts                 | ❌       |
+| 📱 Social Media            | Instagram/Facebook/YouTube/LinkedIn etc. | ❌       |
+| 🤖 AI SEO                  | AI recommendations/content               | ❌       |
+| 📝 Content/Keywords        | Keywords/content planning                | ❌       |
+| 🔗 Backlinks               | Backlink monitoring                      | ❌       |
+| 📑 Reporting               | SEO reports/PDF/email                    | ❌       |
