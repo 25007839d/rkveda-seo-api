@@ -16,6 +16,36 @@ const GITHUB_REF =
 
 
 // =====================================================
+// JSON FIELD HELPER
+// =====================================================
+
+function parseJsonField(value, fallback = []) {
+
+    if (value === null || value === undefined) {
+        return fallback;
+    }
+
+    // MySQL JSON column can already be returned
+    // as an Array/Object depending on mysql2 configuration.
+    if (typeof value !== "string") {
+        return value;
+    }
+
+    try {
+        return JSON.parse(value);
+    } catch (error) {
+
+        console.error(
+            "JSON parse error:",
+            error
+        );
+
+        return fallback;
+    }
+}
+
+
+// =====================================================
 // DISPATCH SEO AUDIT WORKER
 // =====================================================
 
@@ -77,7 +107,6 @@ const dispatchAuditWorker = async (auditId) => {
             }
 
         })
-
     });
 
 
@@ -123,17 +152,19 @@ const createAudit = async (req, res) => {
 
 
         // ---------------------------------------------
-        // 1. Verify project ownership
+        // 1. VERIFY PROJECT OWNERSHIP
         // ---------------------------------------------
 
         const [projects] =
             await db.execute(
+
                 `SELECT
                     id,
                     website_url
                  FROM seo_projects
                  WHERE id = ?
                    AND user_id = ?`,
+
                 [
                     project_id,
                     user_id
@@ -159,11 +190,12 @@ const createAudit = async (req, res) => {
 
 
         // ---------------------------------------------
-        // 2. Create pending audit
+        // 2. CREATE PENDING AUDIT
         // ---------------------------------------------
 
         const [result] =
             await db.execute(
+
                 `INSERT INTO seo_audits
                 (
                     project_id,
@@ -176,6 +208,7 @@ const createAudit = async (req, res) => {
                     'pending',
                     ?
                 )`,
+
                 [
                     project_id,
                     new Date()
@@ -193,7 +226,7 @@ const createAudit = async (req, res) => {
 
 
         // ---------------------------------------------
-        // 3. Dispatch GitHub Actions worker
+        // 3. DISPATCH GITHUB ACTIONS WORKER
         // ---------------------------------------------
 
         try {
@@ -211,15 +244,17 @@ const createAudit = async (req, res) => {
 
 
             // -----------------------------------------
-            // Mark audit as failed
+            // MARK AUDIT FAILED
             // -----------------------------------------
 
             await db.execute(
+
                 `UPDATE seo_audits
                  SET
                     audit_status = 'failed',
                     completed_at = ?
                  WHERE id = ?`,
+
                 [
                     new Date(),
                     auditId
@@ -252,12 +287,13 @@ const createAudit = async (req, res) => {
 
                 error:
                     workerError.message
+
             });
         }
 
 
         // ---------------------------------------------
-        // 4. Return queued audit
+        // 4. RETURN QUEUED AUDIT
         // ---------------------------------------------
 
         return res.status(201).json({
@@ -307,7 +343,7 @@ const createAudit = async (req, res) => {
 
 
         // ---------------------------------------------
-        // Mark audit failed if DB record was created
+        // MARK AUDIT FAILED IF CREATED
         // ---------------------------------------------
 
         if (auditId) {
@@ -315,11 +351,13 @@ const createAudit = async (req, res) => {
             try {
 
                 await db.execute(
+
                     `UPDATE seo_audits
                      SET
                         audit_status = 'failed',
                         completed_at = ?
                      WHERE id = ?`,
+
                     [
                         new Date(),
                         auditId
@@ -368,15 +406,17 @@ const getAudits = async (req, res) => {
 
 
         // ---------------------------------------------
-        // Verify project ownership
+        // VERIFY PROJECT OWNERSHIP
         // ---------------------------------------------
 
         const [projects] =
             await db.execute(
+
                 `SELECT id
                  FROM seo_projects
                  WHERE id = ?
                    AND user_id = ?`,
+
                 [
                     project_id,
                     user_id
@@ -397,8 +437,13 @@ const getAudits = async (req, res) => {
         }
 
 
+        // ---------------------------------------------
+        // GET AUDITS
+        // ---------------------------------------------
+
         const [audits] =
             await db.execute(
+
                 `SELECT
                     id,
                     project_id,
@@ -413,6 +458,7 @@ const getAudits = async (req, res) => {
                  FROM seo_audits
                  WHERE project_id = ?
                  ORDER BY created_at DESC`,
+
                 [
                     project_id
                 ]
@@ -466,12 +512,32 @@ const getAuditById = async (req, res) => {
             req.params.id;
 
 
+        console.log(
+            "===================================="
+        );
+
+        console.log(
+            "GET AUDIT"
+        );
+
+        console.log(
+            "Audit ID:",
+            audit_id
+        );
+
+        console.log(
+            "User ID:",
+            user_id
+        );
+
+
         // =====================================================
         // 1. GET AUDIT SUMMARY
         // =====================================================
 
         const [audits] =
             await db.execute(
+
                 `SELECT
                     a.id,
                     a.project_id,
@@ -488,13 +554,19 @@ const getAuditById = async (req, res) => {
                  INNER JOIN seo_projects p
                      ON a.project_id = p.id
                  WHERE a.id = ?
-                   AND p.user_id = ?`,
+                   AND p.user_id = ?
+                 LIMIT 1`,
+
                 [
                     audit_id,
                     user_id
                 ]
             );
 
+
+        // =====================================================
+        // AUDIT NOT FOUND
+        // =====================================================
 
         if (audits.length === 0) {
 
@@ -519,6 +591,7 @@ const getAuditById = async (req, res) => {
 
         const [results] =
             await db.execute(
+
                 `SELECT
                     issues,
                     warnings,
@@ -527,7 +600,9 @@ const getAuditById = async (req, res) => {
                     created_at,
                     updated_at
                  FROM seo_audit_results
-                 WHERE audit_id = ?`,
+                 WHERE audit_id = ?
+                 LIMIT 1`,
+
                 [
                     audit_id
                 ]
@@ -535,21 +610,25 @@ const getAuditById = async (req, res) => {
 
 
         // =====================================================
-        // 3. PARSE JSON STRINGS
+        // 3. DEFAULT DETAILS
         // =====================================================
 
-        let details = {
+        let issues = [];
 
-            issues: [],
+        let warnings = [];
 
-            warnings: [],
+        let passed = [];
 
-            passed: [],
+        let pageResults = [];
 
-            pageResults: []
+        let resultCreatedAt = null;
 
-        };
+        let resultUpdatedAt = null;
 
+
+        // =====================================================
+        // 4. READ DETAILED RESULT
+        // =====================================================
 
         if (results.length > 0) {
 
@@ -557,85 +636,124 @@ const getAuditById = async (req, res) => {
                 results[0];
 
 
-            try {
+            console.log(
+                "Detailed result found for audit:",
+                audit_id
+            );
 
-                details.issues =
-                    result.issues
-                        ? JSON.parse(result.issues)
-                        : [];
 
-            } catch (error) {
+            // ---------------------------------------------
+            // ISSUES
+            // ---------------------------------------------
 
-                console.error(
-                    "Failed to parse issues:",
-                    error
+            issues =
+                parseJsonField(
+                    result.issues,
+                    []
                 );
 
-            }
 
+            // ---------------------------------------------
+            // WARNINGS
+            // ---------------------------------------------
 
-            try {
-
-                details.warnings =
-                    result.warnings
-                        ? JSON.parse(result.warnings)
-                        : [];
-
-            } catch (error) {
-
-                console.error(
-                    "Failed to parse warnings:",
-                    error
+            warnings =
+                parseJsonField(
+                    result.warnings,
+                    []
                 );
 
-            }
 
+            // ---------------------------------------------
+            // PASSED
+            // ---------------------------------------------
 
-            try {
-
-                details.passed =
-                    result.passed
-                        ? JSON.parse(result.passed)
-                        : [];
-
-            } catch (error) {
-
-                console.error(
-                    "Failed to parse passed:",
-                    error
+            passed =
+                parseJsonField(
+                    result.passed,
+                    []
                 );
 
-            }
 
+            // ---------------------------------------------
+            // PAGE RESULTS
+            // ---------------------------------------------
 
-            try {
-
-                details.pageResults =
-                    result.page_results
-                        ? JSON.parse(result.page_results)
-                        : [];
-
-            } catch (error) {
-
-                console.error(
-                    "Failed to parse page_results:",
-                    error
+            pageResults =
+                parseJsonField(
+                    result.page_results,
+                    []
                 );
 
-            }
+
+            // ---------------------------------------------
+            // RESULT DATES
+            // ---------------------------------------------
+
+            resultCreatedAt =
+                result.created_at || null;
+
+            resultUpdatedAt =
+                result.updated_at || null;
 
 
-            details.created_at =
-                result.created_at;
+        } else {
 
-            details.updated_at =
-                result.updated_at;
-
+            console.log(
+                "No detailed result found for audit:",
+                audit_id
+            );
         }
 
 
         // =====================================================
-        // 4. COMBINE SUMMARY + DETAILS
+        // 5. SAFETY CHECK
+        // =====================================================
+
+        if (!Array.isArray(issues)) {
+            issues = [];
+        }
+
+        if (!Array.isArray(warnings)) {
+            warnings = [];
+        }
+
+        if (!Array.isArray(passed)) {
+            passed = [];
+        }
+
+        if (!Array.isArray(pageResults)) {
+            pageResults = [];
+        }
+
+
+        // =====================================================
+        // 6. LOG COUNTS
+        // =====================================================
+
+        console.log(
+            "Issues:",
+            issues.length
+        );
+
+        console.log(
+            "Warnings:",
+            warnings.length
+        );
+
+        console.log(
+            "Passed:",
+            passed.length
+        );
+
+        console.log(
+            "Page Results:",
+            pageResults.length
+        );
+
+
+        // =====================================================
+        // 7. FINAL RESPONSE
         // =====================================================
 
         return res.status(200).json({
@@ -647,22 +765,22 @@ const getAuditById = async (req, res) => {
                 ...audit,
 
                 issues:
-                    details.issues,
+                    issues,
 
                 warnings:
-                    details.warnings,
+                    warnings,
 
                 passed:
-                    details.passed,
+                    passed,
 
                 pageResults:
-                    details.pageResults,
+                    pageResults,
 
                 result_created_at:
-                    details.created_at || null,
+                    resultCreatedAt,
 
                 result_updated_at:
-                    details.updated_at || null
+                    resultUpdatedAt
 
             }
 
@@ -682,7 +800,10 @@ const getAuditById = async (req, res) => {
             success: false,
 
             message:
-                "Internal server error"
+                "Internal server error",
+
+            error:
+                error.message
 
         });
     }
@@ -703,6 +824,7 @@ const getAuditForWorker = async (req, res) => {
 
         const [audits] =
             await db.execute(
+
                 `SELECT
                     a.id,
                     a.project_id,
@@ -718,7 +840,9 @@ const getAuditForWorker = async (req, res) => {
                  FROM seo_audits a
                  INNER JOIN seo_projects p
                      ON a.project_id = p.id
-                 WHERE a.id = ?`,
+                 WHERE a.id = ?
+                 LIMIT 1`,
+
                 [
                     audit_id
                 ]
@@ -784,19 +908,12 @@ const updateAudit = async (req, res) => {
 
 
         const {
-
             score,
-
             pages_crawled,
-
             issues_count,
-
             warnings_count,
-
             audit_status,
-
             started_at,
-
             completed_at
 
         } = req.body;
@@ -804,6 +921,7 @@ const updateAudit = async (req, res) => {
 
         const [result] =
             await db.execute(
+
                 `UPDATE seo_audits a
                  INNER JOIN seo_projects p
                      ON a.project_id = p.id
@@ -817,6 +935,7 @@ const updateAudit = async (req, res) => {
                     a.completed_at = ?
                  WHERE a.id = ?
                    AND p.user_id = ?`,
+
                 [
 
                     score ?? 0,
@@ -906,12 +1025,14 @@ const deleteAudit = async (req, res) => {
 
         const [result] =
             await db.execute(
+
                 `DELETE a
                  FROM seo_audits a
                  INNER JOIN seo_projects p
                      ON a.project_id = p.id
                  WHERE a.id = ?
                    AND p.user_id = ?`,
+
                 [
                     audit_id,
                     user_id
@@ -977,16 +1098,14 @@ const updateAuditStatus = async (req, res) => {
 
 
         const {
-
             audit_status,
-
             started_at
 
         } = req.body;
 
 
         // ---------------------------------------------
-        // Validate status
+        // VALIDATE STATUS
         // ---------------------------------------------
 
         const allowedStatuses = [
@@ -1020,16 +1139,18 @@ const updateAuditStatus = async (req, res) => {
 
 
         // ---------------------------------------------
-        // Update audit
+        // UPDATE AUDIT
         // ---------------------------------------------
 
         const [result] =
             await db.execute(
+
                 `UPDATE seo_audits
                  SET
                     audit_status = ?,
                     started_at = ?
                  WHERE id = ?`,
+
                 [
 
                     audit_status,
@@ -1044,7 +1165,7 @@ const updateAuditStatus = async (req, res) => {
 
 
         // ---------------------------------------------
-        // Audit not found
+        // AUDIT NOT FOUND
         // ---------------------------------------------
 
         if (
@@ -1140,6 +1261,7 @@ const updateAuditResult = async (req, res) => {
 
         const [updateResult] =
             await db.execute(
+
                 `UPDATE seo_audits
                  SET
                     score = ?,
@@ -1150,6 +1272,7 @@ const updateAuditResult = async (req, res) => {
                     started_at = ?,
                     completed_at = ?
                  WHERE id = ?`,
+
                 [
 
                     score ?? 0,
@@ -1176,7 +1299,7 @@ const updateAuditResult = async (req, res) => {
 
 
         // ---------------------------------------------
-        // Audit not found
+        // AUDIT NOT FOUND
         // ---------------------------------------------
 
         if (
@@ -1217,6 +1340,7 @@ const updateAuditResult = async (req, res) => {
 
 
             await db.execute(
+
                 `INSERT INTO seo_audit_results
                 (
                     audit_id,
@@ -1233,6 +1357,7 @@ const updateAuditResult = async (req, res) => {
                     passed = VALUES(passed),
                     page_results = VALUES(page_results),
                     updated_at = CURRENT_TIMESTAMP`,
+
                 [
 
                     auditId,
@@ -1255,6 +1380,7 @@ const updateAuditResult = async (req, res) => {
 
                 ]
             );
+
         }
 
 
@@ -1292,7 +1418,10 @@ const updateAuditResult = async (req, res) => {
             success: false,
 
             message:
-                "Internal server error"
+                "Internal server error",
+
+            error:
+                error.message
 
         });
     }
