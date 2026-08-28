@@ -1224,172 +1224,188 @@ const updateAuditStatus = async (req, res) => {
 // WORKER - UPDATE AUDIT RESULT
 // =====================================================
 
+// =====================================================
+// WORKER - UPDATE AUDIT RESULT
+// =====================================================
+
 const updateAuditResult = async (req, res) => {
-
     try {
-
-        const auditId =
-            req.params.id;
-
+        const auditId = req.params.id;
 
         const {
-
             score,
-
             pages_crawled,
-
             issues_count,
-
             warnings_count,
-
             audit_status,
-
             started_at,
-
             completed_at,
-
             audit_result,
+            error,
 
-            error
-
+            // Support direct result payload also
+            issues,
+            warnings,
+            passed,
+            pageResults,
+            page_results
         } = req.body;
 
+        console.log("====================================");
+        console.log("UPDATE AUDIT RESULT");
+        console.log("Audit ID:", auditId);
+        console.log("Body keys:", Object.keys(req.body || {}));
+        console.log("====================================");
 
         // =====================================================
         // 1. UPDATE AUDIT SUMMARY
         // =====================================================
 
-        const [updateResult] =
-            await db.execute(
+        const [updateResult] = await db.execute(
+            `
+            UPDATE seo_audits
+            SET
+                score = ?,
+                pages_crawled = ?,
+                issues_count = ?,
+                warnings_count = ?,
+                audit_status = ?,
+                started_at = ?,
+                completed_at = ?
+            WHERE id = ?
+            `,
+            [
+                score ?? 0,
+                pages_crawled ?? 0,
+                issues_count ?? 0,
+                warnings_count ?? 0,
+                audit_status || "completed",
+                started_at || null,
+                completed_at || null,
+                auditId
+            ]
+        );
 
-                `UPDATE seo_audits
-                 SET
-                    score = ?,
-                    pages_crawled = ?,
-                    issues_count = ?,
-                    warnings_count = ?,
-                    audit_status = ?,
-                    started_at = ?,
-                    completed_at = ?
-                 WHERE id = ?`,
-
-                [
-
-                    score ?? 0,
-
-                    pages_crawled ?? 0,
-
-                    issues_count ?? 0,
-
-                    warnings_count ?? 0,
-
-                    audit_status ||
-                        "completed",
-
-                    started_at ||
-                        null,
-
-                    completed_at ||
-                        null,
-
-                    auditId
-
-                ]
-            );
-
-
-        // ---------------------------------------------
+        // =====================================================
         // AUDIT NOT FOUND
-        // ---------------------------------------------
+        // =====================================================
 
-        if (
-            updateResult.affectedRows === 0
-        ) {
-
+        if (updateResult.affectedRows === 0) {
             return res.status(404).json({
-
                 success: false,
-
-                message:
-                    "Audit not found"
-
+                message: "Audit not found"
             });
         }
 
+        // =====================================================
+        // 2. NORMALIZE RESULT
+        // =====================================================
+
+        /*
+         * Worker may send:
+         *
+         * {
+         *   audit_result: {
+         *      issues: [],
+         *      warnings: [],
+         *      passed: [],
+         *      pageResults: []
+         *   }
+         * }
+         *
+         * OR directly:
+         *
+         * {
+         *   issues: [],
+         *   warnings: [],
+         *   passed: [],
+         *   pageResults: []
+         * }
+         */
+
+        const result =
+            audit_result &&
+            typeof audit_result === "object"
+                ? audit_result
+                : {};
+
+        const finalIssues =
+            Array.isArray(result.issues)
+                ? result.issues
+                : Array.isArray(issues)
+                    ? issues
+                    : [];
+
+        const finalWarnings =
+            Array.isArray(result.warnings)
+                ? result.warnings
+                : Array.isArray(warnings)
+                    ? warnings
+                    : [];
+
+        const finalPassed =
+            Array.isArray(result.passed)
+                ? result.passed
+                : Array.isArray(passed)
+                    ? passed
+                    : [];
+
+        const finalPageResults =
+            Array.isArray(result.pageResults)
+                ? result.pageResults
+                : Array.isArray(pageResults)
+                    ? pageResults
+                    : Array.isArray(page_results)
+                        ? page_results
+                        : [];
+
+        console.log("Result details:");
+        console.log("Issues:", finalIssues.length);
+        console.log("Warnings:", finalWarnings.length);
+        console.log("Passed:", finalPassed.length);
+        console.log("Page Results:", finalPageResults.length);
 
         // =====================================================
-        // 2. SAVE DETAILED AUDIT RESULT
+        // 3. SAVE DETAILED AUDIT RESULT
         // =====================================================
 
-        if (audit_result) {
+        await db.execute(
+            `
+            INSERT INTO seo_audit_results
+            (
+                audit_id,
+                issues,
+                warnings,
+                passed,
+                page_results
+            )
+            VALUES
+            (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                issues = VALUES(issues),
+                warnings = VALUES(warnings),
+                passed = VALUES(passed),
+                page_results = VALUES(page_results),
+                updated_at = CURRENT_TIMESTAMP
+            `,
+            [
+                auditId,
 
-            const issues =
-                audit_result.issues || [];
+                JSON.stringify(finalIssues),
 
+                JSON.stringify(finalWarnings),
 
-            const warnings =
-                audit_result.warnings || [];
+                JSON.stringify(finalPassed),
 
-
-            const passed =
-                audit_result.passed || [];
-
-
-            const pageResults =
-                audit_result.pageResults || [];
-
-
-            await db.execute(
-
-                `INSERT INTO seo_audit_results
-                (
-                    audit_id,
-                    issues,
-                    warnings,
-                    passed,
-                    page_results
-                )
-                VALUES
-                (?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    issues = VALUES(issues),
-                    warnings = VALUES(warnings),
-                    passed = VALUES(passed),
-                    page_results = VALUES(page_results),
-                    updated_at = CURRENT_TIMESTAMP`,
-
-                [
-
-                    auditId,
-
-                    JSON.stringify(
-                        issues
-                    ),
-
-                    JSON.stringify(
-                        warnings
-                    ),
-
-                    JSON.stringify(
-                        passed
-                    ),
-
-                    JSON.stringify(
-                        pageResults
-                    )
-
-                ]
-            );
-
-        }
-
+                JSON.stringify(finalPageResults)
+            ]
+        );
 
         // =====================================================
-        // 3. RESPONSE
+        // 4. RESPONSE
         // =====================================================
 
         return res.status(200).json({
-
             success: true,
 
             message:
@@ -1399,11 +1415,20 @@ const updateAuditResult = async (req, res) => {
                 auditId,
 
             audit_status:
-                audit_status ||
-                "completed"
+                audit_status || "completed",
 
+            issues_count:
+                finalIssues.length,
+
+            warnings_count:
+                finalWarnings.length,
+
+            passed_count:
+                finalPassed.length,
+
+            pages_count:
+                finalPageResults.length
         });
-
 
     } catch (error) {
 
@@ -1412,9 +1437,7 @@ const updateAuditResult = async (req, res) => {
             error
         );
 
-
         return res.status(500).json({
-
             success: false,
 
             message:
@@ -1422,11 +1445,9 @@ const updateAuditResult = async (req, res) => {
 
             error:
                 error.message
-
         });
     }
 };
-
 
 // =====================================================
 // EXPORT
