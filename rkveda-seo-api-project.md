@@ -1106,3 +1106,4 @@ Advanced SEO checks
 | 📝 Content/Keywords        | Keywords/content planning                | ❌       |
 | 🔗 Backlinks               | Backlink monitoring                      | ❌       |
 | 📑 Reporting               | SEO reports/PDF/email                    | ❌       |
+[]()

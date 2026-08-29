@@ -9,12 +9,29 @@ const createProject = async (req, res) => {
 
     try {
 
-        const userId =
-            req.user.userId;
+        const userId = req.user.userId;
 
         const {
+            project_name,
             website_url
         } = req.body;
+
+
+        // -------------------------------------------------
+        // VALIDATION
+        // -------------------------------------------------
+
+        if (!project_name) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    "Project name is required"
+
+            });
+        }
 
 
         if (!website_url) {
@@ -27,24 +44,130 @@ const createProject = async (req, res) => {
                     "Website URL is required"
 
             });
+        }
+
+
+        // -------------------------------------------------
+        // NORMALIZE URL
+        // -------------------------------------------------
+
+        let normalizedUrl =
+            website_url.trim();
+
+
+        if (
+            !normalizedUrl.startsWith(
+                "http://"
+            ) &&
+            !normalizedUrl.startsWith(
+                "https://"
+            )
+        ) {
+
+            normalizedUrl =
+                "https://" +
+                normalizedUrl;
 
         }
 
 
+        // -------------------------------------------------
+        // EXTRACT DOMAIN
+        // -------------------------------------------------
+
+        let domain;
+
+        try {
+
+            const parsedUrl =
+                new URL(normalizedUrl);
+
+            domain =
+                parsedUrl.hostname
+                    .replace(/^www\./, "");
+
+        } catch (urlError) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    "Invalid website URL"
+
+            });
+
+        }
+
+
+        // -------------------------------------------------
+        // CHECK DUPLICATE WEBSITE
+        // -------------------------------------------------
+
+        const [existingProjects] =
+            await db.execute(
+
+                `SELECT id
+                 FROM seo_projects
+                 WHERE user_id = ?
+                 AND domain = ?
+                 LIMIT 1`,
+
+                [
+                    userId,
+                    domain
+                ]
+
+            );
+
+
+        if (
+            existingProjects.length > 0
+        ) {
+
+            return res.status(409).json({
+
+                success: false,
+
+                message:
+                    "This website is already added"
+
+            });
+
+        }
+
+
+        // -------------------------------------------------
+        // CREATE PROJECT
+        // -------------------------------------------------
+
         const [result] =
             await db.execute(
+
                 `INSERT INTO seo_projects
                 (
                     user_id,
-                    website_url
+                    project_name,
+                    website_url,
+                    domain,
+                    status
                 )
-                VALUES (?, ?)`,
+                VALUES
+                (?, ?, ?, ?, 'active')`,
+
                 [
                     userId,
-                    website_url
+                    project_name.trim(),
+                    normalizedUrl,
+                    domain
                 ]
+
             );
 
+
+        // -------------------------------------------------
+        // RESPONSE
+        // -------------------------------------------------
 
         return res.status(201).json({
 
@@ -58,7 +181,16 @@ const createProject = async (req, res) => {
                 id:
                     result.insertId,
 
-                website_url
+                project_name:
+                    project_name.trim(),
+
+                website_url:
+                    normalizedUrl,
+
+                domain,
+
+                status:
+                    "active"
 
             }
 
@@ -85,8 +217,6 @@ const createProject = async (req, res) => {
     }
 
 };
-
-
 // =====================================================
 // GET ALL PROJECTS
 // =====================================================
@@ -103,11 +233,15 @@ const getProjects = async (req, res) => {
             await db.execute(
                 `SELECT
                     id,
+                    project_name,
                     website_url,
-                    created_at
-                 FROM seo_projects
-                 WHERE user_id = ?
-                 ORDER BY created_at DESC`,
+                    domain,
+                    status,
+                    created_at,
+                    updated_at
+                FROM seo_projects
+                WHERE user_id = ?
+                ORDER BY created_at DESC`,
                 [
                     userId
                 ]
