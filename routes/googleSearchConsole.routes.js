@@ -10,29 +10,44 @@ const {
 const router = express.Router();
 
 
-// Start Google OAuth
+// ==========================================
+// GOOGLE SEARCH CONSOLE CONNECT
+// ==========================================
+
 router.get(
     "/projects/:projectId/gsc/connect",
     connectGoogle
 );
 
 
-// Google OAuth callback
+// ==========================================
+// GOOGLE OAUTH CALLBACK
+// ==========================================
+
 router.get(
     "/gsc/callback",
     callback
 );
 
 
-// Check GSC connection
+// ==========================================
+// GSC CONNECTION STATUS
+// ==========================================
+
 router.get(
-    "/projects/:projectId/gsc",
+    "/projects/:projectId/gsc/status",
     getStatus
 );
+
+
+// ==========================================
+// GSC PERFORMANCE
+// ==========================================
 
 router.get(
     "/projects/:projectId/gsc/performance",
     performance
 );
+
 
 module.exports = router;
