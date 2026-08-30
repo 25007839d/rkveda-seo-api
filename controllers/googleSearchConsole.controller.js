@@ -5,8 +5,10 @@ const {
     exchangeCode,
     listProperties,
     saveConnection,
-    getConnection
+    getConnection,
+    getPerformanceData
 } = require("../services/googleSearchConsole.service");
+
 
 
 async function connectGoogle(req, res) {
@@ -47,12 +49,9 @@ async function connectGoogle(req, res) {
 
 async function callback(req, res) {
     try {
-        const {
-            code,
-            state,
-            error
-        } = req.query;
+        const { code, state, error } = req.query;
 
+        // Google returned an error
         if (error) {
             return res.status(400).json({
                 success: false,
@@ -60,6 +59,7 @@ async function callback(req, res) {
             });
         }
 
+        // Authorization code missing
         if (!code) {
             return res.status(400).json({
                 success: false,
@@ -67,6 +67,7 @@ async function callback(req, res) {
             });
         }
 
+        // State missing
         if (!state) {
             return res.status(400).json({
                 success: false,
@@ -97,33 +98,73 @@ async function callback(req, res) {
             });
         }
 
-        // Exchange authorization code for tokens
+        // Exchange Google authorization code for tokens
         const tokens = await exchangeCode(code);
 
         console.log("GSC TOKENS RECEIVED");
 
-        // Get user's Search Console properties
+        // Get Search Console properties
         const properties = await listProperties(tokens);
 
         console.log("GSC PROPERTIES:", properties);
 
-        /*
-         * For now we automatically save the first available property.
-         *
-         * Later we will allow the frontend user to select
-         * which GSC property belongs to the project.
-         */
-        const propertyUrl =
-            properties.length > 0
-                ? properties[0].siteUrl
-                : null;
+        // Select first available property
+        const property = properties.length > 0
+            ? properties[0]
+            : null;
 
-        // Save connection into database
-        await saveConnection({
+        const propertyUrl = property
+            ? property.siteUrl
+            : null;
+
+        // Google expiry_date is milliseconds
+        let tokenExpiry = null;
+
+        if (tokens.expiry_date) {
+            tokenExpiry = new Date(tokens.expiry_date);
+        }
+
+        /*
+         * Save / update GSC connection
+         */
+        const sql = `
+            INSERT INTO google_search_console_connections
+            (
+                project_id,
+                google_email,
+                google_account_id,
+                access_token,
+                refresh_token,
+                token_expiry,
+                property_url,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'connected')
+            ON DUPLICATE KEY UPDATE
+                access_token = VALUES(access_token),
+                refresh_token = COALESCE(
+                    VALUES(refresh_token),
+                    refresh_token
+                ),
+                token_expiry = VALUES(token_expiry),
+                property_url = VALUES(property_url),
+                status = 'connected',
+                updated_at = CURRENT_TIMESTAMP
+        `;
+
+        await pool.execute(sql, [
             projectId,
-            tokens,
+            null,
+            null,
+            tokens.access_token,
+            tokens.refresh_token || null,
+            tokenExpiry,
             propertyUrl
-        });
+        ]);
+
+        console.log(
+            `GSC connection saved for project ${projectId}`
+        );
 
         return res.json({
             success: true,
@@ -134,6 +175,7 @@ async function callback(req, res) {
         });
 
     } catch (error) {
+
         console.error("GSC CALLBACK ERROR:", error);
 
         return res.status(500).json({
@@ -144,7 +186,58 @@ async function callback(req, res) {
     }
 }
 
+async function performance(req, res) {
 
+    try {
+
+        const projectId = req.params.projectId;
+
+        /*
+         * Default:
+         * Last 30 days
+         */
+        const endDate = new Date();
+
+        const startDate = new Date();
+
+        startDate.setDate(
+            startDate.getDate() - 30
+        );
+
+        const formatDate = (date) => {
+
+            return date
+                .toISOString()
+                .split("T")[0];
+
+        };
+
+        const result = await getPerformanceData(
+            projectId,
+            formatDate(startDate),
+            formatDate(endDate)
+        );
+
+        return res.json({
+            success: true,
+            ...result
+        });
+
+    } catch (error) {
+
+        console.error(
+            "GSC PERFORMANCE ERROR:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                "Failed to fetch Google Search Console performance data",
+            error: error.message
+        });
+    }
+}
 /**
  * Get GSC connection status
  */
@@ -182,5 +275,6 @@ async function getStatus(req, res) {
 module.exports = {
     connectGoogle,
     callback,
-    getStatus
+    getStatus,
+    performance
 };

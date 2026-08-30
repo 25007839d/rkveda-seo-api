@@ -1,9 +1,10 @@
 const { google } = require("googleapis");
-const db = require("../config/database");
+const pool = require("../config/database");
 
 const SCOPES = [
     "https://www.googleapis.com/auth/webmasters.readonly"
 ];
+
 
 function createOAuthClient() {
     return new google.auth.OAuth2(
@@ -13,7 +14,9 @@ function createOAuthClient() {
     );
 }
 
+
 function getAuthorizationUrl(state) {
+
     const oauth2Client = createOAuthClient();
 
     return oauth2Client.generateAuthUrl({
@@ -25,7 +28,9 @@ function getAuthorizationUrl(state) {
     });
 }
 
+
 async function exchangeCode(code) {
+
     const oauth2Client = createOAuthClient();
 
     const { tokens } = await oauth2Client.getToken(code);
@@ -33,7 +38,9 @@ async function exchangeCode(code) {
     return tokens;
 }
 
+
 async function getSearchConsoleClient(tokens) {
+
     const oauth2Client = createOAuthClient();
 
     oauth2Client.setCredentials(tokens);
@@ -44,7 +51,9 @@ async function getSearchConsoleClient(tokens) {
     });
 }
 
+
 async function listProperties(tokens) {
+
     const searchconsole = await getSearchConsoleClient(tokens);
 
     const response = await searchconsole.sites.list();
@@ -53,84 +62,84 @@ async function listProperties(tokens) {
 }
 
 
-/**
- * Save Google Search Console connection
+/*
+ * Get GSC connection from database
  */
-async function saveConnection({
-    projectId,
-    tokens,
-    propertyUrl
-}) {
-    const tokenExpiry = tokens.expiry_date
-        ? new Date(tokens.expiry_date)
-        : null;
+async function getGSCConnection(projectId) {
 
-    const accessToken = tokens.access_token || null;
-    const refreshToken = tokens.refresh_token || null;
-
-    const sql = `
-        INSERT INTO google_search_console_connections
-        (
-            project_id,
-            access_token,
-            refresh_token,
-            token_expiry,
-            property_url,
-            status
-        )
-        VALUES (?, ?, ?, ?, ?, 'connected')
-        ON DUPLICATE KEY UPDATE
-            access_token = VALUES(access_token),
-            refresh_token = COALESCE(
-                VALUES(refresh_token),
-                refresh_token
-            ),
-            token_expiry = VALUES(token_expiry),
-            property_url = VALUES(property_url),
-            status = 'connected',
-            updated_at = CURRENT_TIMESTAMP
-    `;
-
-    await db.execute(sql, [
-        projectId,
-        accessToken,
-        refreshToken,
-        tokenExpiry,
-        propertyUrl || null
-    ]);
-
-    return {
-        projectId,
-        propertyUrl,
-        status: "connected"
-    };
-}
-
-
-/**
- * Get saved GSC connection for project
- */
-async function getConnection(projectId) {
-    const [rows] = await db.execute(
+    const [rows] = await pool.execute(
         `
         SELECT
             id,
             project_id,
-            google_email,
-            google_account_id,
             property_url,
-            status,
+            access_token,
+            refresh_token,
             token_expiry,
-            created_at,
-            updated_at
+            status
         FROM google_search_console_connections
         WHERE project_id = ?
+          AND status = 'connected'
         LIMIT 1
         `,
         [projectId]
     );
 
-    return rows[0] || null;
+    if (rows.length === 0) {
+        throw new Error(
+            `Google Search Console is not connected for project ${projectId}`
+        );
+    }
+
+    return rows[0];
+}
+
+
+/*
+ * Get actual GSC performance data
+ */
+async function getPerformanceData(
+    projectId,
+    startDate,
+    endDate
+) {
+
+    const connection = await getGSCConnection(projectId);
+
+    const tokens = {
+        access_token: connection.access_token,
+        refresh_token: connection.refresh_token
+    };
+
+    const searchconsole = await getSearchConsoleClient(tokens);
+
+    const response =
+        await searchconsole.searchanalytics.query({
+            siteUrl: connection.property_url,
+
+            requestBody: {
+                startDate,
+                endDate,
+
+                dimensions: [
+                    "date"
+                ],
+
+                rowLimit: 25000,
+
+                dataState: "final"
+            }
+        });
+
+    const rows = response.data.rows || [];
+
+    return {
+        projectId,
+        propertyUrl: connection.property_url,
+        startDate,
+        endDate,
+        rows
+    };
 }
 
 
@@ -138,6 +147,5 @@ module.exports = {
     getAuthorizationUrl,
     exchangeCode,
     listProperties,
-    saveConnection,
-    getConnection
+    getPerformanceData
 };

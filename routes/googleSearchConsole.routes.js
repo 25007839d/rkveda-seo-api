@@ -3,7 +3,8 @@ const express = require("express");
 const {
     connectGoogle,
     callback,
-    getStatus
+    getStatus,
+    performance
 } = require("../controllers/googleSearchConsole.controller");
 
 const router = express.Router();
@@ -29,5 +30,9 @@ router.get(
     getStatus
 );
 
+router.get(
+    "/projects/:projectId/gsc/performance",
+    performance
+);
 
 module.exports = router;
