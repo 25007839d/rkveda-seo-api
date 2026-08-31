@@ -101,245 +101,146 @@ async function connectGoogle(req, res) {
 // ======================================================
 
 async function callback(req, res) {
-
     try {
+        const { code, state, error } = req.query;
 
-        const {
-
-            code,
-
-            state,
-
-            error
-
-        } = req.query;
-
-
-        // ------------------------------------------------
-        // GOOGLE RETURNED ERROR
-        // ------------------------------------------------
-
+        // Google returned an error
         if (error) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    `Google authorization failed: ${error}`
-
+                message: `Google authorization failed: ${error}`
             });
         }
 
-
-        // ------------------------------------------------
-        // CODE VALIDATION
-        // ------------------------------------------------
-
+        // Authorization code missing
         if (!code) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Authorization code missing"
-
+                message: "Authorization code missing"
             });
         }
 
-
-        // ------------------------------------------------
-        // STATE VALIDATION
-        // ------------------------------------------------
-
+        // State missing
         if (!state) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "OAuth state missing"
-
+                message: "OAuth state missing"
             });
         }
 
-
-        // ------------------------------------------------
-        // DECODE STATE
-        // ------------------------------------------------
-
+        // Decode state
         let stateData;
 
-
         try {
-
-            stateData =
-                JSON.parse(
-
-                    Buffer.from(
-                        state,
-                        "base64url"
-                    ).toString("utf8")
-
-                );
-
-
-        } catch (err) {
-
-            console.error(
-                "INVALID GSC STATE:",
-                err
+            stateData = JSON.parse(
+                Buffer.from(state, "base64url").toString("utf8")
             );
-
-
+        } catch (err) {
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Invalid OAuth state"
-
+                message: "Invalid OAuth state"
             });
         }
 
-
-        const projectId =
-            stateData.projectId;
-
+        const projectId = stateData.projectId;
 
         if (!projectId) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Project ID missing from OAuth state"
-
+                message: "Project ID missing from OAuth state"
             });
         }
 
+        // Exchange Google authorization code
+        const tokens = await exchangeCode(code);
 
-        // ------------------------------------------------
-        // EXCHANGE CODE FOR TOKENS
-        // ------------------------------------------------
+        console.log("GSC TOKENS RECEIVED");
 
-        const tokens =
-            await exchangeCode(code);
+        // Get Search Console properties
+        const properties = await listProperties(tokens);
 
+        console.log("GSC PROPERTIES:", properties);
 
-        console.log(
-            "GSC TOKENS RECEIVED"
-        );
-
-
-        if (!tokens.access_token) {
-
-            throw new Error(
-                "Google access token was not returned"
-            );
-        }
-
-
-        // ------------------------------------------------
-        // GET GSC PROPERTIES
-        // ------------------------------------------------
-
-        const properties =
-            await listProperties(tokens);
-
-
-        console.log(
-            "GSC PROPERTIES:",
-            properties
-        );
-
-
-        // ------------------------------------------------
-        // SELECT PROPERTY
-        // ------------------------------------------------
-
+        // Select first available property
         const property =
             properties.length > 0
                 ? properties[0]
                 : null;
-
 
         const propertyUrl =
             property
                 ? property.siteUrl
                 : null;
 
-
-        // ------------------------------------------------
-        // TOKEN EXPIRY
-        // ------------------------------------------------
-
+        // Token expiry
         let tokenExpiry = null;
 
-
         if (tokens.expiry_date) {
-
-            tokenExpiry =
-                new Date(
-                    tokens.expiry_date
-                );
+            tokenExpiry = new Date(tokens.expiry_date);
         }
 
+        /*
+         * Save / update GSC connection
+         */
+        const sql = `
+            INSERT INTO google_search_console_connections
+            (
+                project_id,
+                google_email,
+                google_account_id,
+                access_token,
+                refresh_token,
+                token_expiry,
+                property_url,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'connected')
 
-        // ------------------------------------------------
-        // SAVE CONNECTION
-        // ------------------------------------------------
+            ON DUPLICATE KEY UPDATE
+                access_token = VALUES(access_token),
 
-        await saveConnection({
+                refresh_token = COALESCE(
+                    VALUES(refresh_token),
+                    refresh_token
+                ),
 
+                token_expiry = VALUES(token_expiry),
+
+                property_url = VALUES(property_url),
+
+                status = 'connected',
+
+                updated_at = CURRENT_TIMESTAMP
+        `;
+
+        await pool.execute(sql, [
             projectId,
-
-            googleEmail:
-                null,
-
-            googleAccountId:
-                null,
-
-            accessToken:
-                tokens.access_token,
-
-            refreshToken:
-                tokens.refresh_token || null,
-
+            null,
+            null,
+            tokens.access_token,
+            tokens.refresh_token || null,
             tokenExpiry,
-
             propertyUrl
-
-        });
-
+        ]);
 
         console.log(
             `GSC connection saved for project ${projectId}`
         );
 
+        /*
+         * IMPORTANT:
+         * Do NOT return JSON here.
+         *
+         * Redirect user back to frontend.
+         */
 
-        // ------------------------------------------------
-        // SUCCESS
-        // ------------------------------------------------
+        const frontendUrl =
+            process.env.FRONTEND_URL ||
+            "http://localhost:5173";
 
-        return res.json({
-
-            success: true,
-
-            message:
-                "Google Search Console connected successfully",
-
-            projectId,
-
-            propertyUrl,
-
-            properties
-
-        });
-
+        return res.redirect(
+            `${frontendUrl}/projects/${projectId}/gsc?connected=true`
+        );
 
     } catch (error) {
 
@@ -348,22 +249,14 @@ async function callback(req, res) {
             error
         );
 
-
         return res.status(500).json({
-
             success: false,
-
             message:
                 "Google Search Console connection failed",
-
-            error:
-                error.message
-
+            error: error.message
         });
     }
 }
-
-
 // ======================================================
 // GSC CONNECTION STATUS
 // ======================================================
