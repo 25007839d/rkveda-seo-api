@@ -1,123 +1,190 @@
 const crypto = require("crypto");
 
-const pool = require("../config/database");
-
 const {
+
     getAuthorizationUrl,
+
     exchangeCode,
+
     listProperties,
+
+    saveConnection,
+
     getConnection,
+
     getPerformanceData
+
 } = require("../services/googleSearchConsole.service");
 
 
-/**
- * Start Google Search Console OAuth
- *
- * GET:
- * /api/projects/:projectId/gsc/connect
- */
+// ======================================================
+// CONNECT GOOGLE
+// ======================================================
+
 async function connectGoogle(req, res) {
+
     try {
-        const projectId = req.params.projectId;
+
+        const projectId =
+            req.params.projectId;
+
 
         if (!projectId) {
+
             return res.status(400).json({
+
                 success: false,
-                message: "Project ID is required"
+
+                message:
+                    "Project ID is required"
+
             });
         }
 
-        const state = Buffer.from(
-            JSON.stringify({
-                projectId,
-                nonce: crypto.randomBytes(16).toString("hex")
-            })
-        ).toString("base64url");
 
-        const authUrl = getAuthorizationUrl(state);
+        const state =
+            Buffer.from(
+
+                JSON.stringify({
+
+                    projectId,
+
+                    nonce:
+                        crypto
+                            .randomBytes(16)
+                            .toString("hex")
+
+                })
+
+            ).toString("base64url");
+
+
+        const authUrl =
+            getAuthorizationUrl(state);
+
 
         return res.json({
+
             success: true,
-            authorizationUrl: authUrl
+
+            authorizationUrl:
+                authUrl
+
         });
 
+
     } catch (error) {
-        console.error("GSC CONNECT ERROR:", error);
+
+        console.error(
+            "GSC CONNECT ERROR:",
+            error
+        );
+
 
         return res.status(500).json({
+
             success: false,
-            message: "Failed to create Google authorization URL",
-            error: error.message
+
+            message:
+                "Failed to create Google authorization URL",
+
+            error:
+                error.message
+
         });
     }
 }
 
 
-/**
- * Google OAuth Callback
- *
- * GET:
- * /api/gsc/callback
- */
+// ======================================================
+// GOOGLE OAUTH CALLBACK
+// ======================================================
+
 async function callback(req, res) {
+
     try {
+
         const {
+
             code,
+
             state,
+
             error
+
         } = req.query;
 
 
-        // -----------------------------------------
-        // Google returned an OAuth error
-        // -----------------------------------------
+        // ------------------------------------------------
+        // GOOGLE RETURNED ERROR
+        // ------------------------------------------------
 
         if (error) {
+
             return res.status(400).json({
+
                 success: false,
-                message: `Google authorization failed: ${error}`
+
+                message:
+                    `Google authorization failed: ${error}`
+
             });
         }
 
 
-        // -----------------------------------------
-        // Authorization code validation
-        // -----------------------------------------
+        // ------------------------------------------------
+        // CODE VALIDATION
+        // ------------------------------------------------
 
         if (!code) {
+
             return res.status(400).json({
+
                 success: false,
-                message: "Authorization code missing"
+
+                message:
+                    "Authorization code missing"
+
             });
         }
 
 
-        // -----------------------------------------
-        // State validation
-        // -----------------------------------------
+        // ------------------------------------------------
+        // STATE VALIDATION
+        // ------------------------------------------------
 
         if (!state) {
+
             return res.status(400).json({
+
                 success: false,
-                message: "OAuth state missing"
+
+                message:
+                    "OAuth state missing"
+
             });
         }
 
 
-        // -----------------------------------------
-        // Decode OAuth state
-        // -----------------------------------------
+        // ------------------------------------------------
+        // DECODE STATE
+        // ------------------------------------------------
 
         let stateData;
 
+
         try {
-            stateData = JSON.parse(
-                Buffer.from(
-                    state,
-                    "base64url"
-                ).toString("utf8")
-            );
+
+            stateData =
+                JSON.parse(
+
+                    Buffer.from(
+                        state,
+                        "base64url"
+                    ).toString("utf8")
+
+                );
+
 
         } catch (err) {
 
@@ -126,42 +193,63 @@ async function callback(req, res) {
                 err
             );
 
+
             return res.status(400).json({
+
                 success: false,
-                message: "Invalid OAuth state"
+
+                message:
+                    "Invalid OAuth state"
+
             });
         }
 
 
-        const projectId = stateData.projectId;
+        const projectId =
+            stateData.projectId;
 
 
         if (!projectId) {
+
             return res.status(400).json({
+
                 success: false,
-                message: "Project ID missing from OAuth state"
+
+                message:
+                    "Project ID missing from OAuth state"
+
             });
         }
 
 
-        // -----------------------------------------
-        // Exchange authorization code for tokens
-        // -----------------------------------------
+        // ------------------------------------------------
+        // EXCHANGE CODE FOR TOKENS
+        // ------------------------------------------------
 
-        const tokens = await exchangeCode(code);
+        const tokens =
+            await exchangeCode(code);
+
 
         console.log(
             "GSC TOKENS RECEIVED"
         );
 
 
-        // -----------------------------------------
-        // Get Search Console properties
-        // -----------------------------------------
+        if (!tokens.access_token) {
 
-        const properties = await listProperties(
-            tokens
-        );
+            throw new Error(
+                "Google access token was not returned"
+            );
+        }
+
+
+        // ------------------------------------------------
+        // GET GSC PROPERTIES
+        // ------------------------------------------------
+
+        const properties =
+            await listProperties(tokens);
+
 
         console.log(
             "GSC PROPERTIES:",
@@ -169,9 +257,9 @@ async function callback(req, res) {
         );
 
 
-        // -----------------------------------------
-        // Select first available property
-        // -----------------------------------------
+        // ------------------------------------------------
+        // SELECT PROPERTY
+        // ------------------------------------------------
 
         const property =
             properties.length > 0
@@ -185,76 +273,47 @@ async function callback(req, res) {
                 : null;
 
 
-        // -----------------------------------------
-        // Token expiry
-        // Google expiry_date is milliseconds
-        // -----------------------------------------
+        // ------------------------------------------------
+        // TOKEN EXPIRY
+        // ------------------------------------------------
 
         let tokenExpiry = null;
 
+
         if (tokens.expiry_date) {
-            tokenExpiry = new Date(
-                tokens.expiry_date
-            );
+
+            tokenExpiry =
+                new Date(
+                    tokens.expiry_date
+                );
         }
 
 
-        // -----------------------------------------
-        // Save / update connection
-        // -----------------------------------------
+        // ------------------------------------------------
+        // SAVE CONNECTION
+        // ------------------------------------------------
 
-        const sql = `
-            INSERT INTO google_search_console_connections
-            (
-                project_id,
-                google_email,
-                google_account_id,
-                access_token,
-                refresh_token,
-                token_expiry,
-                property_url,
-                status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'connected')
+        await saveConnection({
 
-            ON DUPLICATE KEY UPDATE
+            projectId,
 
-                access_token = VALUES(access_token),
-
-                refresh_token = COALESCE(
-                    VALUES(refresh_token),
-                    refresh_token
-                ),
-
-                token_expiry = VALUES(token_expiry),
-
-                property_url = VALUES(property_url),
-
-                status = 'connected',
-
-                updated_at = CURRENT_TIMESTAMP
-        `;
-
-
-        await pool.execute(
-            sql,
-            [
-                projectId,
-
-                // We are not currently requesting
-                // email/account-id from Google.
-                null,
+            googleEmail:
                 null,
 
+            googleAccountId:
+                null,
+
+            accessToken:
                 tokens.access_token,
 
+            refreshToken:
                 tokens.refresh_token || null,
 
-                tokenExpiry,
+            tokenExpiry,
 
-                propertyUrl
-            ]
-        );
+            propertyUrl
+
+        });
 
 
         console.log(
@@ -262,11 +321,12 @@ async function callback(req, res) {
         );
 
 
-        // -----------------------------------------
-        // Success response
-        // -----------------------------------------
+        // ------------------------------------------------
+        // SUCCESS
+        // ------------------------------------------------
 
         return res.json({
+
             success: true,
 
             message:
@@ -277,6 +337,7 @@ async function callback(req, res) {
             propertyUrl,
 
             properties
+
         });
 
 
@@ -287,24 +348,26 @@ async function callback(req, res) {
             error
         );
 
+
         return res.status(500).json({
+
             success: false,
 
             message:
                 "Google Search Console connection failed",
 
-            error: error.message
+            error:
+                error.message
+
         });
     }
 }
 
 
-/**
- * Get GSC Connection Status
- *
- * GET:
- * /api/projects/:projectId/gsc/status
- */
+// ======================================================
+// GSC CONNECTION STATUS
+// ======================================================
+
 async function getStatus(req, res) {
 
     try {
@@ -316,8 +379,12 @@ async function getStatus(req, res) {
         if (!projectId) {
 
             return res.status(400).json({
+
                 success: false,
-                message: "Project ID is required"
+
+                message:
+                    "Project ID is required"
+
             });
         }
 
@@ -326,9 +393,9 @@ async function getStatus(req, res) {
             await getConnection(projectId);
 
 
-        // -----------------------------------------
-        // No connection
-        // -----------------------------------------
+        // ------------------------------------------------
+        // NOT CONNECTED
+        // ------------------------------------------------
 
         if (!connection) {
 
@@ -339,13 +406,14 @@ async function getStatus(req, res) {
                 connected: false,
 
                 connection: null
+
             });
         }
 
 
-        // -----------------------------------------
-        // Connection exists
-        // -----------------------------------------
+        // ------------------------------------------------
+        // CONNECTED
+        // ------------------------------------------------
 
         return res.json({
 
@@ -355,6 +423,7 @@ async function getStatus(req, res) {
                 connection.status === "connected",
 
             connection
+
         });
 
 
@@ -373,18 +442,18 @@ async function getStatus(req, res) {
             message:
                 "Failed to get GSC connection status",
 
-            error: error.message
+            error:
+                error.message
+
         });
     }
 }
 
 
-/**
- * Get GSC Performance
- *
- * GET:
- * /api/projects/:projectId/gsc/performance
- */
+// ======================================================
+// GSC PERFORMANCE
+// ======================================================
+
 async function performance(req, res) {
 
     try {
@@ -401,13 +470,14 @@ async function performance(req, res) {
 
                 message:
                     "Project ID is required"
+
             });
         }
 
 
-        // -----------------------------------------
-        // Last 30 days
-        // -----------------------------------------
+        // ------------------------------------------------
+        // LAST 30 DAYS
+        // ------------------------------------------------
 
         const endDate =
             new Date();
@@ -418,20 +488,25 @@ async function performance(req, res) {
 
 
         startDate.setDate(
+
             startDate.getDate() - 30
+
         );
 
 
-        // -----------------------------------------
-        // Format date as YYYY-MM-DD
-        // -----------------------------------------
+        // ------------------------------------------------
+        // DATE FORMAT
+        // YYYY-MM-DD
+        // ------------------------------------------------
 
-        const formatDate = (date) => {
+        const formatDate =
+            (date) => {
 
-            return date
-                .toISOString()
-                .split("T")[0];
-        };
+                return date
+                    .toISOString()
+                    .split("T")[0];
+
+            };
 
 
         const formattedStartDate =
@@ -445,34 +520,45 @@ async function performance(req, res) {
         console.log(
             "GSC PERFORMANCE REQUEST:",
             {
+
                 projectId,
-                startDate: formattedStartDate,
-                endDate: formattedEndDate
+
+                startDate:
+                    formattedStartDate,
+
+                endDate:
+                    formattedEndDate
+
             }
         );
 
 
-        // -----------------------------------------
-        // Get performance data
-        // -----------------------------------------
+        // ------------------------------------------------
+        // GET PERFORMANCE DATA
+        // ------------------------------------------------
 
         const result =
             await getPerformanceData(
+
                 projectId,
+
                 formattedStartDate,
+
                 formattedEndDate
+
             );
 
 
-        // -----------------------------------------
-        // Success
-        // -----------------------------------------
+        // ------------------------------------------------
+        // SUCCESS
+        // ------------------------------------------------
 
         return res.json({
 
             success: true,
 
             ...result
+
         });
 
 
@@ -491,15 +577,18 @@ async function performance(req, res) {
             message:
                 "Failed to fetch Google Search Console performance data",
 
-            error: error.message
+            error:
+                error.message
+
         });
     }
 }
 
 
-/**
- * Routes exported
- */
+// ======================================================
+// EXPORT
+// ======================================================
+
 module.exports = {
 
     connectGoogle,
@@ -509,4 +598,5 @@ module.exports = {
     getStatus,
 
     performance
+
 };
