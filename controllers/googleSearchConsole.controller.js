@@ -461,106 +461,75 @@ async function performance(req, res) {
         const projectId =
             req.params.projectId;
 
-
         if (!projectId) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Project ID is required"
-
+                message: "Project ID is required"
             });
         }
 
+        // --------------------------------------------------
+        // Date parameters
+        // --------------------------------------------------
 
-        // ------------------------------------------------
-        // LAST 30 DAYS
-        // ------------------------------------------------
+        const today = new Date();
 
-        const endDate =
+        const defaultEndDate =
+            today.toISOString().split("T")[0];
+
+        const defaultStart =
             new Date();
 
+        defaultStart.setDate(
+            defaultStart.getDate() - 30
+        );
+
+        const defaultStartDate =
+            defaultStart
+                .toISOString()
+                .split("T")[0];
 
         const startDate =
-            new Date();
+            req.query.startDate ||
+            defaultStartDate;
 
+        const endDate =
+            req.query.endDate ||
+            defaultEndDate;
 
-        startDate.setDate(
+        // --------------------------------------------------
+        // Dimension
+        // --------------------------------------------------
 
-            startDate.getDate() - 30
+        let dimensions = ["date"];
 
-        );
+        if (req.query.dimension) {
 
+            dimensions =
+                req.query.dimension
+                    .split(",")
+                    .map(
+                        item => item.trim()
+                    )
+                    .filter(Boolean);
+        }
 
-        // ------------------------------------------------
-        // DATE FORMAT
-        // YYYY-MM-DD
-        // ------------------------------------------------
-
-        const formatDate =
-            (date) => {
-
-                return date
-                    .toISOString()
-                    .split("T")[0];
-
-            };
-
-
-        const formattedStartDate =
-            formatDate(startDate);
-
-
-        const formattedEndDate =
-            formatDate(endDate);
-
-
-        console.log(
-            "GSC PERFORMANCE REQUEST:",
-            {
-
-                projectId,
-
-                startDate:
-                    formattedStartDate,
-
-                endDate:
-                    formattedEndDate
-
-            }
-        );
-
-
-        // ------------------------------------------------
-        // GET PERFORMANCE DATA
-        // ------------------------------------------------
+        // --------------------------------------------------
+        // Get performance
+        // --------------------------------------------------
 
         const result =
             await getPerformanceData(
-
                 projectId,
-
-                formattedStartDate,
-
-                formattedEndDate
-
+                startDate,
+                endDate,
+                dimensions
             );
 
-
-        // ------------------------------------------------
-        // SUCCESS
-        // ------------------------------------------------
-
         return res.json({
-
             success: true,
-
             ...result
-
         });
-
 
     } catch (error) {
 
@@ -568,7 +537,6 @@ async function performance(req, res) {
             "GSC PERFORMANCE ERROR:",
             error
         );
-
 
         return res.status(500).json({
 
@@ -579,7 +547,6 @@ async function performance(req, res) {
 
             error:
                 error.message
-
         });
     }
 }
