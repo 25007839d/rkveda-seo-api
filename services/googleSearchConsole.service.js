@@ -405,7 +405,8 @@ async function queryPerformance(connection, startDate, endDate, dimensions, data
             endDate,
             dimensions,
             rowLimit,
-            dataState
+            dataState,
+            type: "web"
         }
     });
 
@@ -479,6 +480,9 @@ async function getLastHistorySync(projectId) {
 async function syncPerformanceHistory(projectId, startDate, endDate, dataState = "final") {
     const connection = await getGSCConnection(projectId);
     const rows = await queryPerformance(connection, startDate, endDate, ["date"], dataState, 25000);
+
+    // A valid Search Console range can legitimately return no rows.
+    // Treat that as a successful sync with zero saved days, not as an error.
     const savedDays = await cacheDailyRows(projectId, connection.property_url, rows);
     const summary = summarizeRows(rows);
 

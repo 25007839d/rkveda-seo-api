@@ -344,17 +344,29 @@ async function performance(req, res) {
 }
 
 
-function parseDateRange(req) {
-    const end = req.query.endDate
+function parseDateRange(req, { capEndToYesterday = false } = {}) {
+    let end = req.query.endDate
         ? new Date(`${req.query.endDate}T00:00:00Z`)
         : new Date();
-    const start = req.query.startDate
+    let start = req.query.startDate
         ? new Date(`${req.query.startDate}T00:00:00Z`)
         : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
         throw new Error("Invalid startDate or endDate");
     }
+
+    // Search Console final data is delayed. History sync should never ask
+    // Google for the current day because that can produce an incomplete/
+    // unavailable range while the UI still displays today's date.
+    if (capEndToYesterday) {
+        const yesterday = new Date();
+        yesterday.setUTCHours(0, 0, 0, 0);
+        yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+        if (end > yesterday) end = yesterday;
+        if (start > end) start = end;
+    }
+
     if (start > end) {
         throw new Error("startDate cannot be after endDate");
     }
@@ -370,7 +382,7 @@ async function syncHistory(req, res) {
         const project = await getProjectWebsite(projectId, req.user?.userId);
         if (!project) return res.status(404).json({ success: false, message: "Project not found" });
 
-        const { startDate, endDate } = parseDateRange(req);
+        const { startDate, endDate } = parseDateRange(req, { capEndToYesterday: true });
         const dataState = req.query.dataState === "all" ? "all" : "final";
         const result = await syncPerformanceHistory(projectId, startDate, endDate, dataState);
         return res.json({ success: true, ...result });
@@ -379,7 +391,9 @@ async function syncHistory(req, res) {
         return res.status(500).json({
             success: false,
             message: "Failed to sync Google Search Console history",
-            error: error.message
+            error: error.message,
+            errorCode: error.code || error.response?.status || null,
+            googleReason: error.errors?.[0]?.reason || error.response?.data?.error?.errors?.[0]?.reason || null
         });
     }
 }

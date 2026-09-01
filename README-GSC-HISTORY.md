@@ -20,3 +20,15 @@ The API also creates the table lazily when history is first used.
 All project endpoints require the logged-in user and are scoped to `projectId`.
 
 The normal date performance endpoint automatically upserts daily rows into the cache. Manual Sync History is useful for backfilling a selected period.
+
+
+## History sync hardening
+
+- Manual history sync caps the requested end date at yesterday because finalized Search Console data is delayed.
+- A valid query with zero rows is treated as a successful sync (`savedDays: 0`).
+- The frontend also defaults the performance period to yesterday instead of today.
+- Sync API errors now expose a Google error code/reason to the UI for easier diagnosis.
+
+## Database
+
+Run `database/gsc-performance-cache.sql` once on the production MySQL database before testing history sync. The API still uses `CREATE TABLE IF NOT EXISTS` as a safety net, but production DB users may not have CREATE permission.
