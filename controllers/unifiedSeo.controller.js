@@ -23,7 +23,7 @@ async function overview(req, res) {
     const [[competitors]] = await db.execute('SELECT COUNT(*) AS count FROM competitors WHERE project_id = ?', [projectId]);
     const [[content]] = await db.execute('SELECT COUNT(*) AS count FROM content_plans WHERE project_id = ?', [projectId]);
     const [[recommendations]] = await db.execute("SELECT COUNT(*) AS count FROM seo_ai_recommendations WHERE project_id = ? AND status IN ('open','in_progress')", [projectId]);
-    const [[gsc]] = await db.execute('SELECT status, property_url, last_synced_at FROM google_search_console_connections WHERE project_id = ?', [projectId]);
+    const [[gsc]] = await db.execute('SELECT status, property_url, updated_at AS last_synced_at FROM google_search_console_connections WHERE project_id = ?', [projectId]);
     const [[ga4]] = await db.execute('SELECT status, property_name, last_synced_at FROM ga4_connections WHERE project_id = ?', [projectId]);
     const [[gbp]] = await db.execute('SELECT status, location_name, last_synced_at FROM gbp_connections WHERE project_id = ?', [projectId]);
     const [social] = await db.execute('SELECT platform, status, account_name, last_synced_at FROM social_connections WHERE project_id = ? ORDER BY platform', [projectId]);
