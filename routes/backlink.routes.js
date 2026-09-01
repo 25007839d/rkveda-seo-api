@@ -7,7 +7,8 @@ const {
     getBacklinks,
     getBacklinkById,
     updateBacklink,
-    deleteBacklink
+    deleteBacklink,
+    getBacklinkOpportunities
 } = require("../controllers/backlink.controller");
 
 const authMiddleware = require("../middleware/auth.middleware");
@@ -24,6 +25,12 @@ router.get(
     "/projects/:projectId/backlinks",
     authMiddleware,
     getBacklinks
+);
+
+router.get(
+    "/projects/:projectId/backlink-opportunities",
+    authMiddleware,
+    getBacklinkOpportunities
 );
 
 // Get single backlink

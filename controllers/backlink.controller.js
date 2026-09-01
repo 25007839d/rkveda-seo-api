@@ -307,10 +307,23 @@ const deleteBacklink = async (req, res) => {
 };
 
 
+
+const getBacklinkOpportunities = async (req, res) => {
+    try {
+        const user_id = req.user.userId;
+        const project_id = req.params.projectId;
+        const [projects] = await db.execute(`SELECT id FROM seo_projects WHERE id=? AND user_id=?`, [project_id,user_id]);
+        if (!projects.length) return res.status(404).json({success:false,message:'Project not found'});
+        const [rows] = await db.execute(`SELECT * FROM backlink_opportunities WHERE project_id=? ORDER BY FIELD(priority,'critical','high','medium','low'), created_at DESC`, [project_id]);
+        res.json({success:true,count:rows.length,opportunities:rows});
+    } catch(error){ console.error('Get backlink opportunities error:',error); res.status(500).json({success:false,message:'Unable to load backlink opportunities'}); }
+};
+
 module.exports = {
     createBacklink,
     getBacklinks,
     getBacklinkById,
     updateBacklink,
-    deleteBacklink
+    deleteBacklink,
+    getBacklinkOpportunities
 };

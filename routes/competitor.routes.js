@@ -1,50 +1,14 @@
-const express = require("express");
-
-const router = express.Router();
-
-const {
-    createCompetitor,
-    getCompetitors,
-    getCompetitorById,
-    updateCompetitor,
-    deleteCompetitor
-} = require("../controllers/competitor.controller");
-
-const authMiddleware = require("../middleware/auth.middleware");
-
-// Create competitor
-router.post(
-    "/projects/:projectId/competitors",
-    authMiddleware,
-    createCompetitor
-);
-
-// Get all competitors for project
-router.get(
-    "/projects/:projectId/competitors",
-    authMiddleware,
-    getCompetitors
-);
-
-// Get single competitor
-router.get(
-    "/competitors/:id",
-    authMiddleware,
-    getCompetitorById
-);
-
-// Update competitor
-router.put(
-    "/competitors/:id",
-    authMiddleware,
-    updateCompetitor
-);
-
-// Delete competitor
-router.delete(
-    "/competitors/:id",
-    authMiddleware,
-    deleteCompetitor
-);
-
-module.exports = router;
+const express=require('express');
+const router=express.Router();
+const c=require('../controllers/competitor.controller');
+const auth=require('../middleware/auth.middleware');
+router.post('/projects/:projectId/competitors',auth,c.createCompetitor);
+router.get('/projects/:projectId/competitors',auth,c.getCompetitors);
+router.get('/projects/:projectId/seo/competitors/intelligence',auth,c.getCompetitorIntelligence);
+router.post('/projects/:projectId/seo/backlink-opportunities',auth,c.createOpportunity);
+router.get('/competitors/:id',auth,c.getCompetitorById);
+router.put('/competitors/:id',auth,c.updateCompetitor);
+router.delete('/competitors/:id',auth,c.deleteCompetitor);
+router.post('/competitors/:competitorId/keywords',auth,c.createCompetitorKeyword);
+router.post('/competitors/:competitorId/backlinks',auth,c.createCompetitorBacklink);
+module.exports=router;

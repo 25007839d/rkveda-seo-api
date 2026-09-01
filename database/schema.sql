@@ -148,3 +148,5 @@ CREATE TABLE IF NOT EXISTS google_search_console_connections (
 
     UNIQUE KEY uq_gsc_project (project_id)
 );
+
+-- v3 additive intelligence tables are in seo-intelligence-v3.sql
