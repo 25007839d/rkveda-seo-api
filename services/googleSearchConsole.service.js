@@ -582,6 +582,11 @@ module.exports = {
 
     getConnection,
 
-    getPerformanceData
+    getPerformanceData,
+
+    // Public service export used by the project-scoped history controller.
+    syncPerformanceHistory,
+
+    getPerformanceHistory
 
 };

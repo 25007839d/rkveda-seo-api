@@ -1,0 +1,7 @@
+RKVeda GSC History Sync - Production Backend
+Release: production-fix-v3
+
+Primary fixes:
+- Export syncPerformanceHistory from googleSearchConsole.service.js
+- Accept legacy JSON null bodies with express.json({strict:false})
+- Preserve project-scoped GSC history authorization

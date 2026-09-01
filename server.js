@@ -13,7 +13,7 @@ const backlinkRoutes = require("./routes/backlink.routes");
 const app = express();
 const googleSearchConsoleRoutes = require("./routes/googleSearchConsole.routes");
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ strict: false, limit: "1mb" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api", keywordRoutes);
