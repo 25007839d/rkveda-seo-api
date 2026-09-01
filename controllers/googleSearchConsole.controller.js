@@ -7,6 +7,8 @@ const {
     listProperties,
     getConnection,
     getPerformanceData,
+    syncPerformanceHistory,
+    getPerformanceHistory,
     saveConnection
 } = require("../services/googleSearchConsole.service");
 
@@ -300,12 +302,6 @@ async function performance(req, res) {
             return res.status(404).json({ success: false, message: "Project not found" });
         }
 
-        const isIsoDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
-        if ((req.query.startDate && !isIsoDate(req.query.startDate)) ||
-            (req.query.endDate && !isIsoDate(req.query.endDate))) {
-            return res.status(400).json({ success: false, message: "Dates must use YYYY-MM-DD format" });
-        }
-
         const end = req.query.endDate ? new Date(`${req.query.endDate}T00:00:00Z`) : new Date();
         const start = req.query.startDate
             ? new Date(`${req.query.startDate}T00:00:00Z`)
@@ -317,83 +313,93 @@ async function performance(req, res) {
 
         const formatDate = (date) => date.toISOString().slice(0, 10);
         const dimension = req.query.dimension || "date";
-        const allowedDimensions = ["date", "query", "page", "country", "device", "searchAppearance"];
-        const allowedSearchTypes = ["web", "image", "video", "news", "discover", "googleNews"];
+        const dataState = req.query.dataState === "all" ? "all" : "final";
 
-        if (!allowedDimensions.includes(dimension)) {
+        if (!["date", "query", "page", "country", "device", "searchAppearance"].includes(dimension)) {
             return res.status(400).json({ success: false, message: "Unsupported GSC dimension" });
         }
 
-        if (start > end) {
-            return res.status(400).json({ success: false, message: "startDate must be before or equal to endDate" });
-        }
-
-        const searchType = req.query.searchType || "web";
-        if (!allowedSearchTypes.includes(searchType)) {
-            return res.status(400).json({ success: false, message: "Unsupported GSC search type" });
-        }
-
         const connection = await getConnection(projectId);
-        if (!connection || Number(connection.project_id) !== Number(projectId)) {
+        if (!connection || connection.project_id !== Number(projectId)) {
             return res.status(404).json({ success: false, message: "Google Search Console is not connected for this project" });
         }
-
-        let filters = [];
-        if (req.query.filters) {
-            try {
-                filters = JSON.parse(req.query.filters);
-            } catch {
-                return res.status(400).json({ success: false, message: "Invalid GSC filters JSON" });
-            }
-        }
-
-        const simpleFilters = ["query", "page", "country", "device", "searchAppearance"];
-        simpleFilters.forEach((filterDimension) => {
-            const expression = req.query[filterDimension];
-            if (expression) {
-                filters.push({ dimension: filterDimension, operator: "contains", expression });
-            }
-        });
 
         const result = await getPerformanceData(
             projectId,
             formatDate(start),
             formatDate(end),
             dimension,
-            {
-                searchType,
-                dataState: req.query.dataState === "all" ? "all" : "final",
-                rowLimit: req.query.rowLimit,
-                startRow: req.query.startRow,
-                filters
-            }
+            dataState
         );
 
         return res.json({ success: true, ...result });
     } catch (error) {
         console.error("GSC PERFORMANCE ERROR:", error);
-
-        const googleStatus = Number(error?.response?.status || error?.code || 0);
-        let statusCode = 500;
-        let message = "Failed to fetch Google Search Console performance data";
-
-        if (googleStatus === 400) {
-            statusCode = 400;
-            message = "Google Search Console rejected the performance request";
-        } else if (googleStatus === 401) {
-            statusCode = 401;
-            message = "Google authorization expired. Please reconnect Search Console.";
-        } else if (googleStatus === 403) {
-            statusCode = 403;
-            message = "This Google account does not have access to the connected Search Console property.";
-        } else if (googleStatus === 429) {
-            statusCode = 429;
-            message = "Google Search Console rate limit reached. Please try again shortly.";
-        }
-
-        return res.status(statusCode).json({
+        return res.status(500).json({
             success: false,
-            message,
+            message: "Failed to fetch Google Search Console performance data",
+            error: error.message
+        });
+    }
+}
+
+
+function parseDateRange(req) {
+    const end = req.query.endDate
+        ? new Date(`${req.query.endDate}T00:00:00Z`)
+        : new Date();
+    const start = req.query.startDate
+        ? new Date(`${req.query.startDate}T00:00:00Z`)
+        : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        throw new Error("Invalid startDate or endDate");
+    }
+    if (start > end) {
+        throw new Error("startDate cannot be after endDate");
+    }
+    const formatDate = (date) => date.toISOString().slice(0, 10);
+    return { startDate: formatDate(start), endDate: formatDate(end) };
+}
+
+async function syncHistory(req, res) {
+    try {
+        const projectId = req.params.projectId;
+        if (!projectId) return res.status(400).json({ success: false, message: "Project ID is required" });
+
+        const project = await getProjectWebsite(projectId, req.user?.userId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        const { startDate, endDate } = parseDateRange(req);
+        const dataState = req.query.dataState === "all" ? "all" : "final";
+        const result = await syncPerformanceHistory(projectId, startDate, endDate, dataState);
+        return res.json({ success: true, ...result });
+    } catch (error) {
+        console.error("GSC HISTORY SYNC ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to sync Google Search Console history",
+            error: error.message
+        });
+    }
+}
+
+async function history(req, res) {
+    try {
+        const projectId = req.params.projectId;
+        if (!projectId) return res.status(400).json({ success: false, message: "Project ID is required" });
+
+        const project = await getProjectWebsite(projectId, req.user?.userId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        const { startDate, endDate } = parseDateRange(req);
+        const result = await getPerformanceHistory(projectId, startDate, endDate);
+        return res.json({ success: true, ...result });
+    } catch (error) {
+        console.error("GSC HISTORY ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch Google Search Console history",
             error: error.message
         });
     }
@@ -403,5 +409,7 @@ module.exports = {
     connectGoogle,
     callback,
     getStatus,
-    performance
+    performance,
+    syncHistory,
+    history
 };

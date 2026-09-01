@@ -5,7 +5,9 @@ const {
     connectGoogle,
     callback,
     getStatus,
-    performance
+    performance,
+    syncHistory,
+    history
 } = require("../controllers/googleSearchConsole.controller");
 
 const router = express.Router();
@@ -14,6 +16,8 @@ const router = express.Router();
 router.get("/projects/:projectId/gsc/connect", authMiddleware, connectGoogle);
 router.get("/projects/:projectId/gsc/status", authMiddleware, getStatus);
 router.get("/projects/:projectId/gsc/performance", authMiddleware, performance);
+router.post("/projects/:projectId/gsc/history/sync", authMiddleware, syncHistory);
+router.get("/projects/:projectId/gsc/history", authMiddleware, history);
 
 // OAuth callback is public because Google redirects the browser here.
 router.get("/gsc/callback", callback);
