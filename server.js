@@ -11,9 +11,7 @@ const auditRoutes = require("./routes/audit.routes");
 const competitorRoutes = require("./routes/competitor.routes");
 const backlinkRoutes = require("./routes/backlink.routes");
 const app = express();
-const googleSearchConsoleRoutes =
-    require("./routes/googleSearchConsole.routes");
-const gscRoutes = require("./routes/googleSearchConsole.routes");
+const googleSearchConsoleRoutes = require("./routes/googleSearchConsole.routes");
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", authRoutes);
@@ -40,7 +38,6 @@ app.use(
     "/api",
     googleSearchConsoleRoutes
 );
-app.use("/api", gscRoutes);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`RKVeda SEO API running on port ${PORT}`));

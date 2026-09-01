@@ -1,4 +1,5 @@
 const express = require("express");
+const authMiddleware = require("../middleware/auth.middleware");
 
 const {
     connectGoogle,
@@ -9,45 +10,12 @@ const {
 
 const router = express.Router();
 
+// Project-scoped GSC operations require the logged-in user.
+router.get("/projects/:projectId/gsc/connect", authMiddleware, connectGoogle);
+router.get("/projects/:projectId/gsc/status", authMiddleware, getStatus);
+router.get("/projects/:projectId/gsc/performance", authMiddleware, performance);
 
-// ==========================================
-// GOOGLE SEARCH CONSOLE CONNECT
-// ==========================================
-
-router.get(
-    "/projects/:projectId/gsc/connect",
-    connectGoogle
-);
-
-
-// ==========================================
-// GOOGLE OAUTH CALLBACK
-// ==========================================
-
-router.get(
-    "/gsc/callback",
-    callback
-);
-
-
-// ==========================================
-// GSC CONNECTION STATUS
-// ==========================================
-
-router.get(
-    "/projects/:projectId/gsc/status",
-    getStatus
-);
-
-
-// ==========================================
-// GSC PERFORMANCE
-// ==========================================
-
-router.get(
-    "/projects/:projectId/gsc/performance",
-    performance
-);
-
+// OAuth callback is public because Google redirects the browser here.
+router.get("/gsc/callback", callback);
 
 module.exports = router;

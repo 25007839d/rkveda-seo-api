@@ -126,3 +126,25 @@ CREATE TABLE IF NOT EXISTS backlinks (
         REFERENCES seo_projects(id)
         ON DELETE CASCADE
 );
+
+-- Google Search Console connection per SEO project
+CREATE TABLE IF NOT EXISTS google_search_console_connections (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    project_id BIGINT UNSIGNED NOT NULL,
+    google_email VARCHAR(255) NULL,
+    google_account_id VARCHAR(255) NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NULL,
+    token_expiry DATETIME NULL,
+    property_url VARCHAR(500) NOT NULL,
+    status ENUM('connected', 'disconnected', 'error') DEFAULT 'connected',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_gsc_project
+        FOREIGN KEY (project_id)
+        REFERENCES seo_projects(id)
+        ON DELETE CASCADE,
+
+    UNIQUE KEY uq_gsc_project (project_id)
+);

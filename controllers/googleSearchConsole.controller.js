@@ -36,10 +36,12 @@ function propertyMatchesProject(propertyUrl, websiteUrl) {
         normalizeHost(propertyUrl) === normalizeHost(websiteUrl);
 }
 
-async function getProjectWebsite(projectId) {
+async function getProjectWebsite(projectId, userId = null) {
     const [rows] = await pool.execute(
-        `SELECT id, website_url, domain FROM projects WHERE id = ? LIMIT 1`,
-        [projectId]
+        userId
+            ? `SELECT id, website_url, domain FROM seo_projects WHERE id = ? AND user_id = ? LIMIT 1`
+            : `SELECT id, website_url, domain FROM seo_projects WHERE id = ? LIMIT 1`,
+        userId ? [projectId, userId] : [projectId]
     );
 
     return rows[0] || null;
@@ -58,6 +60,62 @@ function frontendRedirect(projectId, params = {}) {
     return url.toString();
 }
 
+function createOAuthState(projectId) {
+    const payload = Buffer.from(JSON.stringify({
+        projectId: String(projectId),
+        nonce: crypto.randomBytes(16).toString("hex"),
+        ts: Date.now()
+    })).toString("base64url");
+
+    const secret = process.env.JWT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+    const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+    return `${payload}.${signature}`;
+}
+
+function parseOAuthState(state) {
+    const [payload, signature] = String(state || "").split(".");
+    if (!payload || !signature) throw new Error("Invalid OAuth state");
+
+    const secret = process.env.JWT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+    const expected = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+    const a = Buffer.from(signature);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        throw new Error("Invalid OAuth state signature");
+    }
+
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!data.projectId || !data.ts || Date.now() - Number(data.ts) > 10 * 60 * 1000) {
+        throw new Error("OAuth state expired");
+    }
+    return data;
+}
+
+function normalizedWebsiteUrl(value) {
+    if (!value) return "";
+    let raw = String(value).trim().toLowerCase();
+    if (!raw.includes("://")) raw = `https://${raw}`;
+    try {
+        const url = new URL(raw);
+        return `${url.protocol}//${url.hostname.replace(/^www\./, "")}${url.pathname.replace(/\/$/, "")}`;
+    } catch {
+        return raw.replace(/\/$/, "");
+    }
+}
+
+function propertyMatchesProject(propertyUrl, project) {
+    const property = String(propertyUrl || "").trim().toLowerCase();
+    const website = normalizedWebsiteUrl(project?.website_url);
+    const domain = normalizeHost(project?.domain || project?.website_url);
+
+    // Prefer an exact URL-prefix property when one exists.
+    if (!property.startsWith("sc-domain:")) {
+        return normalizedWebsiteUrl(property) === website;
+    }
+
+    return normalizeHost(property) === domain;
+}
+
 /** Start Google Search Console OAuth. */
 async function connectGoogle(req, res) {
     try {
@@ -66,15 +124,12 @@ async function connectGoogle(req, res) {
             return res.status(400).json({ success: false, message: "Project ID is required" });
         }
 
-        const project = await getProjectWebsite(projectId);
+        const project = await getProjectWebsite(projectId, req.user?.userId);
         if (!project) {
             return res.status(404).json({ success: false, message: "Project not found" });
         }
 
-        const state = Buffer.from(JSON.stringify({
-            projectId: String(projectId),
-            nonce: crypto.randomBytes(16).toString("hex")
-        })).toString("base64url");
+        const state = createOAuthState(projectId);
 
         return res.json({
             success: true,
@@ -99,12 +154,11 @@ async function callback(req, res) {
 
         if (state) {
             try {
-                const stateData = JSON.parse(
-                    Buffer.from(state, "base64url").toString("utf8")
-                );
+                const stateData = parseOAuthState(state);
                 projectId = stateData.projectId;
             } catch (stateError) {
                 console.error("INVALID GSC STATE:", stateError);
+                return res.status(400).json({ success: false, message: stateError.message });
             }
         }
 
@@ -141,7 +195,7 @@ async function callback(req, res) {
         // IMPORTANT: never attach the first Google property to the project.
         // Match the Google Search Console property to this project's website.
         const property = properties.find((item) =>
-            propertyMatchesProject(item?.siteUrl, project.website_url || project.domain)
+            propertyMatchesProject(item?.siteUrl, project)
         );
 
         if (!property) {
@@ -227,6 +281,11 @@ async function getStatus(req, res) {
             return res.status(400).json({ success: false, message: "Project ID is required" });
         }
 
+        const project = await getProjectWebsite(projectId, req.user?.userId);
+        if (!project) {
+            return res.status(404).json({ success: false, message: "Project not found" });
+        }
+
         const connection = await getConnection(projectId);
         if (!connection) {
             return res.json({ success: true, connected: false, connection: null });
@@ -252,6 +311,11 @@ async function performance(req, res) {
         const projectId = req.params.projectId;
         if (!projectId) {
             return res.status(400).json({ success: false, message: "Project ID is required" });
+        }
+
+        const project = await getProjectWebsite(projectId, req.user?.userId);
+        if (!project) {
+            return res.status(404).json({ success: false, message: "Project not found" });
         }
 
         const end = req.query.endDate ? new Date(`${req.query.endDate}T00:00:00Z`) : new Date();
