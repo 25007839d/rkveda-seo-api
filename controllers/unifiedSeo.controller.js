@@ -1,0 +1,150 @@
+const db = require('../config/database');
+
+async function getOwnedProject(projectId, userId) {
+  const [rows] = await db.execute(
+    'SELECT id, project_name, website_url, domain, status FROM seo_projects WHERE id = ? AND user_id = ?',
+    [projectId, userId]
+  );
+  return rows[0] || null;
+}
+
+function fail(res, status, message) {
+  return res.status(status).json({ success: false, message });
+}
+
+async function overview(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    const project = await getOwnedProject(projectId, req.user.userId);
+    if (!project) return fail(res, 404, 'Project not found');
+
+    const [[keywords]] = await db.execute('SELECT COUNT(*) AS count FROM keywords WHERE project_id = ?', [projectId]);
+    const [[backlinks]] = await db.execute('SELECT COUNT(*) AS count FROM backlinks WHERE project_id = ?', [projectId]);
+    const [[competitors]] = await db.execute('SELECT COUNT(*) AS count FROM competitors WHERE project_id = ?', [projectId]);
+    const [[content]] = await db.execute('SELECT COUNT(*) AS count FROM content_plans WHERE project_id = ?', [projectId]);
+    const [[recommendations]] = await db.execute("SELECT COUNT(*) AS count FROM seo_ai_recommendations WHERE project_id = ? AND status IN ('open','in_progress')", [projectId]);
+    const [[gsc]] = await db.execute('SELECT status, property_url, last_synced_at FROM google_search_console_connections WHERE project_id = ?', [projectId]);
+    const [[ga4]] = await db.execute('SELECT status, property_name, last_synced_at FROM ga4_connections WHERE project_id = ?', [projectId]);
+    const [[gbp]] = await db.execute('SELECT status, location_name, last_synced_at FROM gbp_connections WHERE project_id = ?', [projectId]);
+    const [social] = await db.execute('SELECT platform, status, account_name, last_synced_at FROM social_connections WHERE project_id = ? ORDER BY platform', [projectId]);
+
+    return res.json({
+      success: true,
+      project,
+      counts: {
+        keywords: Number(keywords.count), backlinks: Number(backlinks.count), competitors: Number(competitors.count),
+        content: Number(content.count), recommendations: Number(recommendations.count)
+      },
+      integrations: { gsc: gsc || null, ga4: ga4 || null, gbp: gbp || null, social }
+    });
+  } catch (error) {
+    console.error('Unified SEO overview error:', error);
+    return fail(res, 500, 'Failed to load SEO overview');
+  }
+}
+
+async function listConnections(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const [ga4] = await db.execute('SELECT id, property_id, property_name, status, last_synced_at FROM ga4_connections WHERE project_id = ?', [projectId]);
+    const [gbp] = await db.execute('SELECT id, account_id, location_id, location_name, status, last_synced_at FROM gbp_connections WHERE project_id = ?', [projectId]);
+    const [social] = await db.execute('SELECT id, platform, account_id, account_name, status, last_synced_at FROM social_connections WHERE project_id = ? ORDER BY platform', [projectId]);
+    return res.json({ success: true, ga4: ga4[0] || null, gbp: gbp[0] || null, social });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to load integrations'); }
+}
+
+async function upsertIntegration(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const type = req.params.type;
+    const body = req.body || {};
+    if (!['ga4','gbp'].includes(type)) return fail(res, 400, 'Unsupported integration');
+
+    const table = type === 'ga4' ? 'ga4_connections' : 'gbp_connections';
+    const fields = type === 'ga4'
+      ? ['property_id','property_name','access_token','refresh_token','token_expiry','status']
+      : ['account_id','location_id','location_name','access_token','refresh_token','token_expiry','status'];
+    const values = fields.map(f => body[f] ?? null);
+    values[values.length - 1] = body.status || 'connected';
+    const placeholders = fields.map(() => '?').join(',');
+    const updates = fields.filter(f => f !== 'access_token').map(f => `${f}=VALUES(${f})`).join(',');
+    await db.execute(`INSERT INTO ${table} (project_id, ${fields.join(',')}) VALUES (?, ${placeholders}) ON DUPLICATE KEY UPDATE ${updates}`, [projectId, ...values]);
+    return res.json({ success: true, message: `${type.toUpperCase()} connection saved` });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to save integration'); }
+}
+
+async function upsertSocial(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const { platform, account_id, account_name, access_token, refresh_token, token_expiry, status } = req.body || {};
+    const allowed = ['facebook','instagram','linkedin','youtube','x','tiktok','other'];
+    if (!allowed.includes(platform)) return fail(res, 400, 'Invalid social platform');
+    await db.execute(`INSERT INTO social_connections (project_id,platform,account_id,account_name,access_token,refresh_token,token_expiry,status) VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE account_id=VALUES(account_id),account_name=VALUES(account_name),access_token=COALESCE(VALUES(access_token),access_token),refresh_token=COALESCE(VALUES(refresh_token),refresh_token),token_expiry=VALUES(token_expiry),status=VALUES(status)`, [projectId, platform, account_id || null, account_name || null, access_token || null, refresh_token || null, token_expiry || null, status || 'connected']);
+    return res.json({ success: true, message: 'Social connection saved' });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to save social connection'); }
+}
+
+async function listContent(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const [rows] = await db.execute('SELECT id, keyword_id, title, search_intent, target_url, status, priority, notes, created_at, updated_at FROM content_plans WHERE project_id = ? ORDER BY FIELD(priority,\'critical\',\'high\',\'medium\',\'low\'), created_at DESC', [projectId]);
+    return res.json({ success: true, count: rows.length, content: rows });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to load content plans'); }
+}
+
+async function createContent(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const { title, keyword_id, search_intent, target_url, status, priority, notes } = req.body || {};
+    if (!title) return fail(res, 400, 'Title is required');
+    const [result] = await db.execute('INSERT INTO content_plans (project_id,keyword_id,title,search_intent,target_url,status,priority,notes) VALUES (?,?,?,?,?,?,?,?)', [projectId, keyword_id || null, title, search_intent || 'unknown', target_url || null, status || 'idea', priority || 'medium', notes || null]);
+    return res.status(201).json({ success: true, id: result.insertId });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to create content plan'); }
+}
+
+async function listRecommendations(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const [rows] = await db.execute('SELECT id, source_type, category, title, recommendation, priority, status, evidence_json, created_at FROM seo_ai_recommendations WHERE project_id = ? ORDER BY FIELD(priority,\'critical\',\'high\',\'medium\',\'low\'), created_at DESC', [projectId]);
+    return res.json({ success: true, count: rows.length, recommendations: rows });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to load recommendations'); }
+}
+
+async function createRecommendation(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const { source_type, category, title, recommendation, priority, evidence_json } = req.body || {};
+    if (!category || !title || !recommendation) return fail(res, 400, 'category, title and recommendation are required');
+    const [result] = await db.execute('INSERT INTO seo_ai_recommendations (project_id,source_type,category,title,recommendation,priority,evidence_json) VALUES (?,?,?,?,?,?,?)', [projectId, source_type || 'manual', category, title, recommendation, priority || 'medium', evidence_json ? JSON.stringify(evidence_json) : null]);
+    return res.status(201).json({ success: true, id: result.insertId });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to create recommendation'); }
+}
+
+async function listReports(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const [rows] = await db.execute('SELECT id, report_name, report_type, date_from, date_to, status, file_path, created_at FROM seo_reports WHERE project_id = ? ORDER BY created_at DESC', [projectId]);
+    return res.json({ success: true, count: rows.length, reports: rows });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to load reports'); }
+}
+
+async function createReport(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
+    const { report_name, report_type, date_from, date_to } = req.body || {};
+    if (!report_name) return fail(res, 400, 'report_name is required');
+    const [result] = await db.execute('INSERT INTO seo_reports (project_id,report_name,report_type,date_from,date_to,status) VALUES (?,?,?,?,?,\'queued\')', [projectId, report_name, report_type || 'overview', date_from || null, date_to || null]);
+    return res.status(201).json({ success: true, id: result.insertId, status: 'queued', message: 'Report queued for generation' });
+  } catch (error) { console.error(error); return fail(res, 500, 'Failed to queue report'); }
+}
+
+module.exports = { overview, listConnections, upsertIntegration, upsertSocial, listContent, createContent, listRecommendations, createRecommendation, listReports, createReport };

@@ -1,0 +1,15 @@
+const express = require('express');
+const auth = require('../middleware/auth.middleware');
+const c = require('../controllers/unifiedSeo.controller');
+const router = express.Router();
+router.get('/projects/:projectId/seo/overview', auth, c.overview);
+router.get('/projects/:projectId/seo/integrations', auth, c.listConnections);
+router.put('/projects/:projectId/seo/integrations/:type', auth, c.upsertIntegration);
+router.put('/projects/:projectId/seo/social/:platform', auth, c.upsertSocial);
+router.get('/projects/:projectId/seo/content', auth, c.listContent);
+router.post('/projects/:projectId/seo/content', auth, c.createContent);
+router.get('/projects/:projectId/seo/recommendations', auth, c.listRecommendations);
+router.post('/projects/:projectId/seo/recommendations', auth, c.createRecommendation);
+router.get('/projects/:projectId/seo/reports', auth, c.listReports);
+router.post('/projects/:projectId/seo/reports', auth, c.createReport);
+module.exports = router;
