@@ -359,18 +359,35 @@ async function getPerformanceData(
 
 
     const tokens = {
-
-        access_token:
-            connection.access_token,
-
-        refresh_token:
-            connection.refresh_token
+        access_token: connection.access_token,
+        refresh_token: connection.refresh_token
     };
 
+    const oauth2Client = createOAuthClient();
+    oauth2Client.setCredentials(tokens);
 
-    const searchconsole =
-        await getSearchConsoleClient(tokens);
+    // Refresh an expired/near-expiry access token when a refresh token exists.
+    // Persist the new access token so subsequent requests continue to work.
+    if (connection.refresh_token) {
+        const expiry = connection.token_expiry ? new Date(connection.token_expiry).getTime() : 0;
+        if (!expiry || expiry <= Date.now() + 60 * 1000) {
+            const refreshed = await oauth2Client.getAccessToken();
+            if (refreshed?.token) {
+                tokens.access_token = refreshed.token;
+                await pool.execute(
+                    `UPDATE google_search_console_connections
+                     SET access_token = ?, token_expiry = COALESCE(?, token_expiry), updated_at = CURRENT_TIMESTAMP
+                     WHERE project_id = ?`,
+                    [tokens.access_token, oauth2Client.credentials.expiry_date ? new Date(oauth2Client.credentials.expiry_date) : null, projectId]
+                );
+            }
+        }
+    }
 
+    const searchconsole = google.searchconsole({
+        version: "v1",
+        auth: oauth2Client
+    });
 
     const response =
         await searchconsole.searchanalytics.query({

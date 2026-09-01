@@ -6,7 +6,8 @@ const {
     exchangeCode,
     listProperties,
     getConnection,
-    getPerformanceData
+    getPerformanceData,
+    saveConnection
 } = require("../services/googleSearchConsole.service");
 
 function normalizeHost(value) {
@@ -29,11 +30,6 @@ function normalizeHost(value) {
             .split(":")[0]
             .replace(/^www\./, "");
     }
-}
-
-function propertyMatchesProject(propertyUrl, websiteUrl) {
-    return normalizeHost(propertyUrl) !== "" &&
-        normalizeHost(propertyUrl) === normalizeHost(websiteUrl);
 }
 
 async function getProjectWebsite(projectId, userId = null) {
@@ -60,9 +56,10 @@ function frontendRedirect(projectId, params = {}) {
     return url.toString();
 }
 
-function createOAuthState(projectId) {
+function createOAuthState(projectId, userId) {
     const payload = Buffer.from(JSON.stringify({
         projectId: String(projectId),
+        userId: String(userId),
         nonce: crypto.randomBytes(16).toString("hex"),
         ts: Date.now()
     })).toString("base64url");
@@ -85,7 +82,7 @@ function parseOAuthState(state) {
     }
 
     const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    if (!data.projectId || !data.ts || Date.now() - Number(data.ts) > 10 * 60 * 1000) {
+    if (!data.projectId || !data.userId || !data.ts || Date.now() - Number(data.ts) > 10 * 60 * 1000) {
         throw new Error("OAuth state expired");
     }
     return data;
@@ -129,7 +126,12 @@ async function connectGoogle(req, res) {
             return res.status(404).json({ success: false, message: "Project not found" });
         }
 
-        const state = createOAuthState(projectId);
+        const userId = req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Authenticated user is required" });
+        }
+
+        const state = createOAuthState(projectId, userId);
 
         return res.json({
             success: true,
@@ -148,6 +150,7 @@ async function connectGoogle(req, res) {
 /** Google OAuth callback. */
 async function callback(req, res) {
     let projectId = null;
+    let userId = null;
 
     try {
         const { code, state, error } = req.query;
@@ -156,6 +159,7 @@ async function callback(req, res) {
             try {
                 const stateData = parseOAuthState(state);
                 projectId = stateData.projectId;
+                userId = stateData.userId;
             } catch (stateError) {
                 console.error("INVALID GSC STATE:", stateError);
                 return res.status(400).json({ success: false, message: stateError.message });
@@ -183,8 +187,11 @@ async function callback(req, res) {
         if (!projectId) {
             return res.status(400).json({ success: false, message: "Project ID missing from OAuth state" });
         }
+        if (!userId) {
+            return res.status(400).json({ success: false, message: "User ID missing from OAuth state" });
+        }
 
-        const project = await getProjectWebsite(projectId);
+        const project = await getProjectWebsite(projectId, userId);
         if (!project) {
             return res.status(404).json({ success: false, message: "Project not found" });
         }
@@ -216,38 +223,13 @@ async function callback(req, res) {
 
         const tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
 
-        await pool.execute(
-            `
-            INSERT INTO google_search_console_connections
-            (
-                project_id,
-                google_email,
-                google_account_id,
-                access_token,
-                refresh_token,
-                token_expiry,
-                property_url,
-                status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'connected')
-            ON DUPLICATE KEY UPDATE
-                access_token = VALUES(access_token),
-                refresh_token = COALESCE(VALUES(refresh_token), refresh_token),
-                token_expiry = VALUES(token_expiry),
-                property_url = VALUES(property_url),
-                status = 'connected',
-                updated_at = CURRENT_TIMESTAMP
-            `,
-            [
-                projectId,
-                null,
-                null,
-                tokens.access_token,
-                tokens.refresh_token || null,
-                tokenExpiry,
-                property.siteUrl
-            ]
-        );
+        await saveConnection({
+            projectId,
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token || null,
+            tokenExpiry,
+            propertyUrl: property.siteUrl,
+        });
 
         console.log("GSC connection saved", {
             projectId,
@@ -332,6 +314,11 @@ async function performance(req, res) {
 
         if (!["date", "query", "page", "country", "device"].includes(dimension)) {
             return res.status(400).json({ success: false, message: "Unsupported GSC dimension" });
+        }
+
+        const connection = await getConnection(projectId);
+        if (!connection || connection.project_id !== Number(projectId)) {
+            return res.status(404).json({ success: false, message: "Google Search Console is not connected for this project" });
         }
 
         const result = await getPerformanceData(
