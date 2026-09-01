@@ -1,6 +1,7 @@
 const { google } = require("googleapis");
 const pool = require("../config/database");
 
+
 // ======================================================
 // GOOGLE SEARCH CONSOLE SCOPE
 // ======================================================
@@ -21,7 +22,6 @@ function createOAuthClient() {
         process.env.GOOGLE_CLIENT_SECRET,
         process.env.GOOGLE_REDIRECT_URI
     );
-
 }
 
 
@@ -44,14 +44,12 @@ function getAuthorizationUrl(state) {
         prompt: "consent",
 
         state
-
     });
-
 }
 
 
 // ======================================================
-// EXCHANGE GOOGLE AUTHORIZATION CODE
+// EXCHANGE AUTHORIZATION CODE FOR TOKENS
 // ======================================================
 
 async function exchangeCode(code) {
@@ -62,7 +60,6 @@ async function exchangeCode(code) {
         await oauth2Client.getToken(code);
 
     return tokens;
-
 }
 
 
@@ -72,8 +69,7 @@ async function exchangeCode(code) {
 
 async function getSearchConsoleClient(tokens) {
 
-    const oauth2Client =
-        createOAuthClient();
+    const oauth2Client = createOAuthClient();
 
     oauth2Client.setCredentials(tokens);
 
@@ -84,7 +80,6 @@ async function getSearchConsoleClient(tokens) {
         auth: oauth2Client
 
     });
-
 }
 
 
@@ -101,7 +96,6 @@ async function listProperties(tokens) {
         await searchconsole.sites.list();
 
     return response.data.siteEntry || [];
-
 }
 
 
@@ -132,16 +126,13 @@ async function saveConnection({
         throw new Error(
             "Project ID is required"
         );
-
     }
-
 
     if (!accessToken) {
 
         throw new Error(
             "Google access token is required"
         );
-
     }
 
 
@@ -198,38 +189,25 @@ async function saveConnection({
 
             updated_at =
                 CURRENT_TIMESTAMP
-
     `;
 
 
     const [result] =
         await pool.execute(
-
             sql,
-
             [
-
                 projectId,
-
                 googleEmail,
-
                 googleAccountId,
-
                 accessToken,
-
                 refreshToken,
-
                 tokenExpiry,
-
                 propertyUrl
-
             ]
-
         );
 
 
     return result;
-
 }
 
 
@@ -244,7 +222,6 @@ async function getConnection(projectId) {
         throw new Error(
             "Project ID is required"
         );
-
     }
 
 
@@ -252,7 +229,6 @@ async function getConnection(projectId) {
         await pool.execute(
 
             `
-
             SELECT
 
                 id,
@@ -278,18 +254,15 @@ async function getConnection(projectId) {
             WHERE project_id = ?
 
             LIMIT 1
-
             `,
 
             [projectId]
-
         );
 
 
     return rows.length > 0
         ? rows[0]
         : null;
-
 }
 
 
@@ -305,7 +278,6 @@ async function getGSCConnection(projectId) {
         throw new Error(
             "Project ID is required"
         );
-
     }
 
 
@@ -313,7 +285,6 @@ async function getGSCConnection(projectId) {
         await pool.execute(
 
             `
-
             SELECT
 
                 id,
@@ -337,11 +308,9 @@ async function getGSCConnection(projectId) {
               AND status = 'connected'
 
             LIMIT 1
-
             `,
 
             [projectId]
-
         );
 
 
@@ -350,12 +319,10 @@ async function getGSCConnection(projectId) {
         throw new Error(
             `Google Search Console is not connected for project ${projectId}`
         );
-
     }
 
 
     return rows[0];
-
 }
 
 
@@ -364,13 +331,10 @@ async function getGSCConnection(projectId) {
 // ======================================================
 
 async function getPerformanceData(
-
     projectId,
-
     startDate,
-
-    endDate
-
+    endDate,
+    dimension = "date"
 ) {
 
     const connection =
@@ -382,19 +346,15 @@ async function getPerformanceData(
         throw new Error(
             "Google Search Console property is not configured"
         );
-
     }
 
 
-    if (
-        !connection.refresh_token &&
-        !connection.access_token
-    ) {
+    if (!connection.refresh_token &&
+        !connection.access_token) {
 
         throw new Error(
             "Google authentication tokens are missing"
         );
-
     }
 
 
@@ -405,7 +365,6 @@ async function getPerformanceData(
 
         refresh_token:
             connection.refresh_token
-
     };
 
 
@@ -425,18 +384,12 @@ async function getPerformanceData(
 
                 endDate,
 
-                dimensions: [
-
-                    "date"
-
-                ],
+                dimensions: [dimension],
 
                 rowLimit: 25000,
 
                 dataState: "final"
-
             }
-
         });
 
 
@@ -456,9 +409,7 @@ async function getPerformanceData(
         endDate,
 
         rows
-
     };
-
 }
 
 
