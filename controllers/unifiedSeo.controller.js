@@ -54,17 +54,86 @@ async function keywords(req, res) {
     const previous = previousPeriod(range);
     const dataState = req.query.dataState === 'all' ? 'all' : 'final';
 
-    const [currentResult, previousResult] = await Promise.all([
-      getPerformanceData(projectId, range.startDate, range.endDate, 'query', dataState),
-      getPerformanceData(projectId, previous.startDate, previous.endDate, 'query', dataState),
-    ]);
+    // Tracked keywords are the source of truth for the number of keywords a
+    // project manages. GSC query rows are enrichment data and may legitimately
+    // be empty (new site, no impressions, delayed GSC data, etc.).
+    const [trackedRows] = await db.execute(
+      `SELECT id, keyword, search_engine, country, language, target_url, created_at
+       FROM keywords
+       WHERE project_id = ?
+       ORDER BY created_at DESC`,
+      [projectId]
+    );
+
+    let currentResult = { rows: [], propertyUrl: null };
+    let previousResult = { rows: [], propertyUrl: null };
+    let gscError = null;
+
+    try {
+      [currentResult, previousResult] = await Promise.all([
+        getPerformanceData(projectId, range.startDate, range.endDate, 'query', dataState),
+        getPerformanceData(projectId, previous.startDate, previous.endDate, 'query', dataState),
+      ]);
+    } catch (error) {
+      gscError = error.message || 'Google Search Console data unavailable';
+      console.warn('SEO KEYWORDS GSC WARNING:', gscError);
+    }
 
     const currentRows = mapKeywordRows(currentResult.rows);
     const previousRows = mapKeywordRows(previousResult.rows);
-    const previousMap = new Map(previousRows.map((row) => [row.keyword, row]));
+    const currentMap = new Map(currentRows.map((row) => [row.keyword.toLowerCase(), row]));
+    const previousMap = new Map(previousRows.map((row) => [row.keyword.toLowerCase(), row]));
+    const resultMap = new Map();
 
-    const result = currentRows.map((row) => {
-      const old = previousMap.get(row.keyword);
+    // Start with tracked keywords so they are visible even when GSC has no row.
+    for (const tracked of trackedRows) {
+      const key = String(tracked.keyword || '').trim().toLowerCase();
+      if (!key) continue;
+      const row = currentMap.get(key);
+      const old = previousMap.get(key);
+      const hasGsc = Boolean(row);
+      let trend = 'no_data';
+      let positionChange = null;
+      let clicksChange = null;
+      let impressionsChange = null;
+      if (row && old) {
+        positionChange = Number(old.position - row.position);
+        clicksChange = Number(row.clicks - old.clicks);
+        impressionsChange = Number(row.impressions - old.impressions);
+        if (positionChange > 0.5) trend = 'improving';
+        else if (positionChange < -0.5) trend = 'declining';
+        else trend = 'stable';
+      } else if (row) {
+        trend = 'new';
+      }
+      resultMap.set(key, {
+        ...row,
+        keyword: tracked.keyword,
+        keywordId: tracked.id,
+        targetUrl: tracked.target_url,
+        searchEngine: tracked.search_engine,
+        country: tracked.country,
+        language: tracked.language,
+        tracked: true,
+        hasGscData: hasGsc,
+        clicks: row?.clicks ?? 0,
+        impressions: row?.impressions ?? 0,
+        ctr: row?.ctr ?? 0,
+        ctrPercent: row?.ctrPercent ?? 0,
+        position: row?.position ?? null,
+        previousPosition: old?.position ?? null,
+        positionChange,
+        clicksChange,
+        impressionsChange,
+        trend,
+      });
+    }
+
+    // Also show GSC queries that are not manually tracked.
+    for (const row of currentRows) {
+      const key = row.keyword.toLowerCase();
+      if (resultMap.has(key)) continue;
+      const old = previousMap.get(key);
       const positionChange = old ? Number(old.position - row.position) : null;
       const clicksChange = old ? Number(row.clicks - old.clicks) : null;
       const impressionsChange = old ? Number(row.impressions - old.impressions) : null;
@@ -74,12 +143,28 @@ async function keywords(req, res) {
         else if (positionChange < -0.5) trend = 'declining';
         else trend = 'stable';
       }
-      return { ...row, previousPosition: old?.position ?? null, positionChange, clicksChange, impressionsChange, trend };
-    });
+      resultMap.set(key, {
+        ...row,
+        keywordId: null,
+        targetUrl: null,
+        searchEngine: 'google',
+        country: null,
+        language: null,
+        tracked: false,
+        hasGscData: true,
+        previousPosition: old?.position ?? null,
+        positionChange,
+        clicksChange,
+        impressionsChange,
+        trend,
+      });
+    }
 
-    result.sort((a, b) => b.impressions - a.impressions || a.position - b.position);
+    const result = Array.from(resultMap.values());
+    result.sort((a, b) => b.impressions - a.impressions || (a.position ?? 9999) - (b.position ?? 9999) || a.keyword.localeCompare(b.keyword));
 
-    const summary = result.reduce((acc, row) => {
+    const gscRows = currentRows;
+    const summary = gscRows.reduce((acc, row) => {
       acc.clicks += row.clicks;
       acc.impressions += row.impressions;
       acc.weightedPosition += row.position * row.impressions;
@@ -92,16 +177,21 @@ async function keywords(req, res) {
     return res.json({
       success: true,
       projectId,
-      propertyUrl: currentResult.propertyUrl,
+      propertyUrl: currentResult.propertyUrl || null,
       startDate: range.startDate,
       endDate: range.endDate,
       previousStartDate: previous.startDate,
       previousEndDate: previous.endDate,
       dataState,
-      source: 'google_search_console',
+      source: 'tracked_keywords_plus_google_search_console',
+      gscAvailable: !gscError,
+      gscError,
       count: result.length,
+      trackedCount: trackedRows.length,
+      gscKeywordCount: currentRows.length,
       summary: {
-        keywords: result.length,
+        keywords: trackedRows.length,
+        visibleKeywords: result.length,
         clicks: summary.clicks,
         impressions: summary.impressions,
         ctr: totalCtr,
@@ -109,6 +199,7 @@ async function keywords(req, res) {
         improving: result.filter((r) => r.trend === 'improving').length,
         declining: result.filter((r) => r.trend === 'declining').length,
         new: result.filter((r) => r.trend === 'new').length,
+        noData: result.filter((r) => r.trend === 'no_data').length,
       },
       keywords: result,
     });
