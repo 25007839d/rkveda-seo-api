@@ -3,6 +3,7 @@ const auth = require('../middleware/auth.middleware');
 const c = require('../controllers/unifiedSeo.controller');
 const router = express.Router();
 router.get('/projects/:projectId/seo/overview', auth, c.overview);
+router.get('/projects/:projectId/seo/keywords', auth, c.keywords);
 router.get('/projects/:projectId/seo/integrations', auth, c.listConnections);
 router.put('/projects/:projectId/seo/integrations/:type', auth, c.upsertIntegration);
 router.put('/projects/:projectId/seo/social/:platform', auth, c.upsertSocial);

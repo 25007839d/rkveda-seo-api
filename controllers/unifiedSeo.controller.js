@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { getPerformanceData } = require('../services/googleSearchConsole.service');
 
 async function getOwnedProject(projectId, userId) {
   const [rows] = await db.execute(
@@ -10,6 +11,116 @@ async function getOwnedProject(projectId, userId) {
 
 function fail(res, status, message) {
   return res.status(status).json({ success: false, message });
+}
+
+
+
+function parseKeywordDateRange(req) {
+  const end = req.query.endDate ? new Date(`${req.query.endDate}T00:00:00Z`) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const start = req.query.startDate ? new Date(`${req.query.startDate}T00:00:00Z`) : new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    throw new Error('Invalid startDate or endDate');
+  }
+  return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) };
+}
+
+function previousPeriod({ startDate, endDate }) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const days = Math.round((end - start) / 86400000) + 1;
+  const previousEnd = new Date(start.getTime() - 86400000);
+  const previousStart = new Date(previousEnd.getTime() - (days - 1) * 86400000);
+  return { startDate: previousStart.toISOString().slice(0, 10), endDate: previousEnd.toISOString().slice(0, 10) };
+}
+
+function mapKeywordRows(rows = []) {
+  return rows.map((row) => ({
+    keyword: row?.keys?.[0] || '',
+    clicks: Number(row.clicks || 0),
+    impressions: Number(row.impressions || 0),
+    ctr: Number(row.ctr || 0),
+    ctrPercent: Number(row.ctr || 0) * 100,
+    position: Number(row.position || 0),
+  })).filter((row) => row.keyword);
+}
+
+async function keywords(req, res) {
+  try {
+    const projectId = Number(req.params.projectId);
+    const project = await getOwnedProject(projectId, req.user.userId);
+    if (!project) return fail(res, 404, 'Project not found');
+
+    const range = parseKeywordDateRange(req);
+    const previous = previousPeriod(range);
+    const dataState = req.query.dataState === 'all' ? 'all' : 'final';
+
+    const [currentResult, previousResult] = await Promise.all([
+      getPerformanceData(projectId, range.startDate, range.endDate, 'query', dataState),
+      getPerformanceData(projectId, previous.startDate, previous.endDate, 'query', dataState),
+    ]);
+
+    const currentRows = mapKeywordRows(currentResult.rows);
+    const previousRows = mapKeywordRows(previousResult.rows);
+    const previousMap = new Map(previousRows.map((row) => [row.keyword, row]));
+
+    const result = currentRows.map((row) => {
+      const old = previousMap.get(row.keyword);
+      const positionChange = old ? Number(old.position - row.position) : null;
+      const clicksChange = old ? Number(row.clicks - old.clicks) : null;
+      const impressionsChange = old ? Number(row.impressions - old.impressions) : null;
+      let trend = 'new';
+      if (old) {
+        if (positionChange > 0.5) trend = 'improving';
+        else if (positionChange < -0.5) trend = 'declining';
+        else trend = 'stable';
+      }
+      return { ...row, previousPosition: old?.position ?? null, positionChange, clicksChange, impressionsChange, trend };
+    });
+
+    result.sort((a, b) => b.impressions - a.impressions || a.position - b.position);
+
+    const summary = result.reduce((acc, row) => {
+      acc.clicks += row.clicks;
+      acc.impressions += row.impressions;
+      acc.weightedPosition += row.position * row.impressions;
+      return acc;
+    }, { clicks: 0, impressions: 0, weightedPosition: 0 });
+
+    const totalCtr = summary.impressions ? (summary.clicks / summary.impressions) * 100 : 0;
+    const averagePosition = summary.impressions ? summary.weightedPosition / summary.impressions : 0;
+
+    return res.json({
+      success: true,
+      projectId,
+      propertyUrl: currentResult.propertyUrl,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      previousStartDate: previous.startDate,
+      previousEndDate: previous.endDate,
+      dataState,
+      source: 'google_search_console',
+      count: result.length,
+      summary: {
+        keywords: result.length,
+        clicks: summary.clicks,
+        impressions: summary.impressions,
+        ctr: totalCtr,
+        averagePosition,
+        improving: result.filter((r) => r.trend === 'improving').length,
+        declining: result.filter((r) => r.trend === 'declining').length,
+        new: result.filter((r) => r.trend === 'new').length,
+      },
+      keywords: result,
+    });
+  } catch (error) {
+    console.error('SEO KEYWORDS ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to load keyword intelligence',
+      errorCode: error.code || error.response?.status || null,
+      googleReason: error.errors?.[0]?.reason || error.response?.data?.error?.errors?.[0]?.reason || null,
+    });
+  }
 }
 
 async function overview(req, res) {
@@ -147,4 +258,5 @@ async function createReport(req, res) {
   } catch (error) { console.error(error); return fail(res, 500, 'Failed to queue report'); }
 }
 
-module.exports = { overview, listConnections, upsertIntegration, upsertSocial, listContent, createContent, listRecommendations, createRecommendation, listReports, createReport };
+module.exports = {
+  keywords, overview, listConnections, upsertIntegration, upsertSocial, listContent, createContent, listRecommendations, createRecommendation, listReports, createReport };
