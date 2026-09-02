@@ -5,6 +5,8 @@ const auth=require('../middleware/auth.middleware');
 router.post('/projects/:projectId/competitors',auth,c.createCompetitor);
 router.get('/projects/:projectId/competitors',auth,c.getCompetitors);
 router.get('/projects/:projectId/seo/competitors/intelligence',auth,c.getCompetitorIntelligence);
+router.get('/projects/:projectId/seo/competitors/provider-status',auth,c.getCompetitorProviderStatus);
+router.post('/projects/:projectId/seo/competitors/sync',auth,c.syncCompetitorData);
 router.post('/projects/:projectId/seo/backlink-opportunities',auth,c.createOpportunity);
 router.put('/projects/:projectId/seo/backlink-opportunities/:id',auth,c.updateOpportunity);
 router.delete('/projects/:projectId/seo/backlink-opportunities/:id',auth,c.deleteOpportunity);

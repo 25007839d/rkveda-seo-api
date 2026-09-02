@@ -1,4 +1,5 @@
 const db = require("../config/database");
+const competitorSync = require("../services/competitorSync.service");
 
 async function ensureCompetitorIntelligenceTables() {
   await db.query(`
@@ -16,7 +17,7 @@ async function ensureCompetitorIntelligenceTables() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT fk_comp_keyword_competitor FOREIGN KEY (competitor_id) REFERENCES competitors(id) ON DELETE CASCADE,
-      UNIQUE KEY uq_competitor_keyword (competitor_id,keyword),
+      UNIQUE KEY uq_competitor_keyword_source (competitor_id,keyword,source),
       KEY idx_comp_keyword_position (competitor_id,ranking_position)
     ) ENGINE=InnoDB
   `);
@@ -59,6 +60,10 @@ async function ensureCompetitorIntelligenceTables() {
       KEY idx_backlink_opp_project_priority (project_id,priority)
     ) ENGINE=InnoDB
   `);
+  // Existing installations created the older keyword uniqueness key without source.
+  // Replace it so manual observations and provider observations can coexist safely.
+  try { await db.query(`ALTER TABLE competitor_keywords DROP INDEX uq_competitor_keyword`); } catch (_) {}
+  try { await db.query(`ALTER TABLE competitor_keywords ADD UNIQUE KEY uq_competitor_keyword_source (competitor_id,keyword,source)`); } catch (_) {}
 }
 
 async function verifyProject(userId, projectId) {
@@ -136,4 +141,26 @@ const createOpportunity=async(req,res)=>{try{await ensureCompetitorIntelligenceT
 const updateOpportunity=async(req,res)=>{try{const p=await verifyProject(req.user.userId,req.params.projectId);if(!p)return res.status(404).json({success:false,message:'Project not found'});const b=req.body||{};const domain=cleanDomain(b.referring_domain);if(!domain)return res.status(400).json({success:false,message:'Referring domain is required'});const [r]=await db.execute(`UPDATE backlink_opportunities SET referring_domain=?,source_url=?,target_url=?,anchor_text=?,opportunity_type=?,priority=?,status=?,authority=?,notes=? WHERE id=? AND project_id=?`,[domain,b.source_url||null,b.target_url||p.website_url,b.anchor_text||null,b.opportunity_type||'other',b.priority||'medium',b.status||'open',b.authority===''?null:b.authority??null,b.notes||null,req.params.id,p.id]);if(!r.affectedRows)return res.status(404).json({success:false,message:'Opportunity not found'});res.json({success:true,message:'Opportunity updated'});}catch(e){console.error(e);res.status(500).json({success:false,message:'Unable to update opportunity'});}};
 const deleteOpportunity=async(req,res)=>{try{const p=await verifyProject(req.user.userId,req.params.projectId);if(!p)return res.status(404).json({success:false,message:'Project not found'});const [r]=await db.execute(`DELETE FROM backlink_opportunities WHERE id=? AND project_id=?`,[req.params.id,p.id]);if(!r.affectedRows)return res.status(404).json({success:false,message:'Opportunity not found'});res.json({success:true,message:'Opportunity deleted'});}catch(e){res.status(500).json({success:false,message:'Unable to delete opportunity'});}};
 
-module.exports={createCompetitor,getCompetitors,getCompetitorById,updateCompetitor,deleteCompetitor,getCompetitorIntelligence,createCompetitorKeyword,updateCompetitorKeyword,deleteCompetitorKeyword,createCompetitorBacklink,updateCompetitorBacklink,deleteCompetitorBacklink,createOpportunity,updateOpportunity,deleteOpportunity};
+
+const syncCompetitorData = async (req,res) => {
+  try {
+    const projectId=req.params.projectId;
+    const type=['all','keywords','backlinks'].includes(req.body?.type) ? req.body.type : 'all';
+    const result=await competitorSync.syncCompetitor({userId:req.user.userId,projectId,competitorId:req.body?.competitorId||null,type,locationName:req.body?.locationName||'India',languageName:req.body?.languageName||'English',limit:req.body?.limit||100});
+    res.json({success:result.success,...result});
+  } catch(e) {
+    console.error('Competitor provider sync error:',e);
+    res.status(e.statusCode||500).json({success:false,code:e.code||'PROVIDER_SYNC_FAILED',message:e.message||'Unable to sync competitor data'});
+  }
+};
+const getCompetitorProviderStatus = async (req,res) => {
+  try {
+    const status=await competitorSync.getProviderStatus(req.params.projectId,req.user.userId);
+    res.json({success:true,...status});
+  } catch(e) {
+    console.error('Competitor provider status error:',e);
+    res.status(500).json({success:false,message:'Unable to load provider status'});
+  }
+};
+
+module.exports={createCompetitor,getCompetitors,getCompetitorById,updateCompetitor,deleteCompetitor,getCompetitorIntelligence,createCompetitorKeyword,updateCompetitorKeyword,deleteCompetitorKeyword,createCompetitorBacklink,updateCompetitorBacklink,deleteCompetitorBacklink,createOpportunity,updateOpportunity,deleteOpportunity,syncCompetitorData,getCompetitorProviderStatus};
