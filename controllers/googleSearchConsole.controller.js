@@ -160,10 +160,6 @@ async function callback(req, res) {
         if (state) {
             try {
                 const stateData = parseOAuthState(state);
-                if (stateData.type === "ga4") {
-                    const { callback: ga4Callback } = require("./googleAnalytics4.controller");
-                    return ga4Callback(req, res, stateData);
-                }
                 projectId = stateData.projectId;
                 userId = stateData.userId;
             } catch (stateError) {

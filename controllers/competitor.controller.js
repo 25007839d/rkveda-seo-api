@@ -141,4 +141,5 @@ const updateOpportunity=async(req,res)=>{try{const p=await verifyProject(req.use
 const deleteOpportunity=async(req,res)=>{try{const p=await verifyProject(req.user.userId,req.params.projectId);if(!p)return res.status(404).json({success:false,message:'Project not found'});const [r]=await db.execute(`DELETE FROM backlink_opportunities WHERE id=? AND project_id=?`,[req.params.id,p.id]);if(!r.affectedRows)return res.status(404).json({success:false,message:'Opportunity not found'});res.json({success:true,message:'Opportunity deleted'});}catch(e){res.status(500).json({success:false,message:'Unable to delete opportunity'});}};
 
 
+
 module.exports={createCompetitor,getCompetitors,getCompetitorById,updateCompetitor,deleteCompetitor,getCompetitorIntelligence,createCompetitorKeyword,updateCompetitorKeyword,deleteCompetitorKeyword,createCompetitorBacklink,updateCompetitorBacklink,deleteCompetitorBacklink,createOpportunity,updateOpportunity,deleteOpportunity};
