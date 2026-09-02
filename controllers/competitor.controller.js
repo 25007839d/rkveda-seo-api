@@ -1,5 +1,74 @@
 const db = require("../config/database");
 
+async function ensureCompetitorIntelligenceTables() {
+  // Safe idempotent bootstrap for installations where the v3 migration
+  // has not yet been applied. This prevents the whole intelligence page
+  // from failing simply because one additive table is missing.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS competitor_keywords (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      competitor_id BIGINT UNSIGNED NOT NULL,
+      keyword VARCHAR(255) NOT NULL,
+      ranking_position DECIMAL(8,2) NULL,
+      search_volume INT NULL,
+      ranking_url VARCHAR(1000) NULL,
+      traffic_estimate INT NULL,
+      difficulty DECIMAL(6,2) NULL,
+      source VARCHAR(50) DEFAULT 'manual',
+      checked_at DATETIME NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_comp_keyword_competitor
+        FOREIGN KEY (competitor_id) REFERENCES competitors(id) ON DELETE CASCADE,
+      UNIQUE KEY uq_competitor_keyword (competitor_id,keyword),
+      KEY idx_comp_keyword_position (competitor_id,ranking_position)
+    ) ENGINE=InnoDB
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS competitor_backlinks (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      competitor_id BIGINT UNSIGNED NOT NULL,
+      source_url VARCHAR(1000) NOT NULL,
+      target_url VARCHAR(1000) NULL,
+      anchor_text VARCHAR(500) NULL,
+      domain_authority DECIMAL(6,2) NULL,
+      status ENUM('active','lost','new') DEFAULT 'active',
+      first_seen_at DATETIME NULL,
+      last_seen_at DATETIME NULL,
+      source VARCHAR(50) DEFAULT 'manual',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_comp_backlink_competitor
+        FOREIGN KEY (competitor_id) REFERENCES competitors(id) ON DELETE CASCADE,
+      KEY idx_comp_backlink_status (competitor_id,status)
+    ) ENGINE=InnoDB
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS backlink_opportunities (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      project_id BIGINT UNSIGNED NOT NULL,
+      referring_domain VARCHAR(255) NOT NULL,
+      source_url VARCHAR(1000) NULL,
+      target_url VARCHAR(1000) NULL,
+      anchor_text VARCHAR(500) NULL,
+      opportunity_type ENUM('competitor_link','lost_link','resource','guest_post','directory','other') DEFAULT 'competitor_link',
+      priority ENUM('low','medium','high','critical') DEFAULT 'medium',
+      status ENUM('open','contacted','won','rejected') DEFAULT 'open',
+      authority DECIMAL(6,2) NULL,
+      notes TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_backlink_opp_project
+        FOREIGN KEY (project_id) REFERENCES seo_projects(id) ON DELETE CASCADE,
+      KEY idx_backlink_opp_project_status (project_id,status),
+      KEY idx_backlink_opp_project_priority (project_id,priority)
+    ) ENGINE=InnoDB
+  `);
+}
+
+
 async function verifyProject(userId, projectId) {
   const [rows] = await db.execute(
     `SELECT id, project_name, website_url, domain FROM seo_projects WHERE id = ? AND user_id = ?`,
@@ -70,6 +139,7 @@ const deleteCompetitor = async (req,res) => {
 
 const getCompetitorIntelligence = async (req,res) => {
   try {
+    await ensureCompetitorIntelligenceTables();
     const projectId=req.params.projectId;
     const project=await verifyProject(req.user.userId,projectId);
     if(!project)return res.status(404).json({success:false,message:"Project not found"});
@@ -98,15 +168,18 @@ const getCompetitorIntelligence = async (req,res) => {
 };
 
 const createCompetitorKeyword = async(req,res)=>{
- try{const c=await verifyCompetitor(req.user.userId,req.params.competitorId);if(!c)return res.status(404).json({success:false,message:'Competitor not found'});const b=req.body||{};if(!String(b.keyword||'').trim())return res.status(400).json({success:false,message:'Keyword is required'});const [r]=await db.execute(`INSERT INTO competitor_keywords(competitor_id,keyword,ranking_position,search_volume,ranking_url,traffic_estimate,difficulty,source,checked_at) VALUES(?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE ranking_position=VALUES(ranking_position),search_volume=VALUES(search_volume),ranking_url=VALUES(ranking_url),traffic_estimate=VALUES(traffic_estimate),difficulty=VALUES(difficulty),source=VALUES(source),checked_at=VALUES(checked_at)`,[c.id,String(b.keyword).trim(),b.ranking_position??null,b.search_volume??null,b.ranking_url||null,b.traffic_estimate??null,b.difficulty??null,b.source||'manual',b.checked_at||new Date()]);res.status(201).json({success:true,id:r.insertId||null,message:'Competitor keyword saved'});}catch(e){console.error(e);res.status(500).json({success:false,message:'Unable to save competitor keyword'});}
+ try{
+    await ensureCompetitorIntelligenceTables();const c=await verifyCompetitor(req.user.userId,req.params.competitorId);if(!c)return res.status(404).json({success:false,message:'Competitor not found'});const b=req.body||{};if(!String(b.keyword||'').trim())return res.status(400).json({success:false,message:'Keyword is required'});const [r]=await db.execute(`INSERT INTO competitor_keywords(competitor_id,keyword,ranking_position,search_volume,ranking_url,traffic_estimate,difficulty,source,checked_at) VALUES(?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE ranking_position=VALUES(ranking_position),search_volume=VALUES(search_volume),ranking_url=VALUES(ranking_url),traffic_estimate=VALUES(traffic_estimate),difficulty=VALUES(difficulty),source=VALUES(source),checked_at=VALUES(checked_at)`,[c.id,String(b.keyword).trim(),b.ranking_position??null,b.search_volume??null,b.ranking_url||null,b.traffic_estimate??null,b.difficulty??null,b.source||'manual',b.checked_at||new Date()]);res.status(201).json({success:true,id:r.insertId||null,message:'Competitor keyword saved'});}catch(e){console.error(e);res.status(500).json({success:false,message:'Unable to save competitor keyword'});}
 };
 
 const createCompetitorBacklink = async(req,res)=>{
- try{const c=await verifyCompetitor(req.user.userId,req.params.competitorId);if(!c)return res.status(404).json({success:false,message:'Competitor not found'});const b=req.body||{};if(!String(b.source_url||'').trim())return res.status(400).json({success:false,message:'Source URL is required'});const [r]=await db.execute(`INSERT INTO competitor_backlinks(competitor_id,source_url,target_url,anchor_text,domain_authority,status,first_seen_at,last_seen_at,source) VALUES(?,?,?,?,?,?,?,?,?)`,[c.id,b.source_url,b.target_url||null,b.anchor_text||null,b.domain_authority??null,b.status||'active',b.first_seen_at||null,b.last_seen_at||null,b.source||'manual']);res.status(201).json({success:true,id:r.insertId,message:'Competitor backlink saved'});}catch(e){console.error(e);res.status(500).json({success:false,message:'Unable to save competitor backlink'});}
+ try{
+    await ensureCompetitorIntelligenceTables();const c=await verifyCompetitor(req.user.userId,req.params.competitorId);if(!c)return res.status(404).json({success:false,message:'Competitor not found'});const b=req.body||{};if(!String(b.source_url||'').trim())return res.status(400).json({success:false,message:'Source URL is required'});const [r]=await db.execute(`INSERT INTO competitor_backlinks(competitor_id,source_url,target_url,anchor_text,domain_authority,status,first_seen_at,last_seen_at,source) VALUES(?,?,?,?,?,?,?,?,?)`,[c.id,b.source_url,b.target_url||null,b.anchor_text||null,b.domain_authority??null,b.status||'active',b.first_seen_at||null,b.last_seen_at||null,b.source||'manual']);res.status(201).json({success:true,id:r.insertId,message:'Competitor backlink saved'});}catch(e){console.error(e);res.status(500).json({success:false,message:'Unable to save competitor backlink'});}
 };
 
 const createOpportunity = async(req,res)=>{
- try{const p=await verifyProject(req.user.userId,req.params.projectId);if(!p)return res.status(404).json({success:false,message:'Project not found'});const b=req.body||{};if(!String(b.referring_domain||'').trim())return res.status(400).json({success:false,message:'Referring domain is required'});const [r]=await db.execute(`INSERT INTO backlink_opportunities(project_id,referring_domain,source_url,target_url,anchor_text,opportunity_type,priority,status,authority,notes) VALUES(?,?,?,?,?,?,?,?,?,?)`,[p.id,b.referring_domain,b.source_url||null,b.target_url||p.website_url,b.anchor_text||null,b.opportunity_type||'other',b.priority||'medium',b.status||'open',b.authority??null,b.notes||null]);res.status(201).json({success:true,id:r.insertId,message:'Backlink opportunity saved'});}catch(e){console.error(e);res.status(500).json({success:false,message:'Unable to save opportunity'});}
+ try{
+    await ensureCompetitorIntelligenceTables();const p=await verifyProject(req.user.userId,req.params.projectId);if(!p)return res.status(404).json({success:false,message:'Project not found'});const b=req.body||{};if(!String(b.referring_domain||'').trim())return res.status(400).json({success:false,message:'Referring domain is required'});const [r]=await db.execute(`INSERT INTO backlink_opportunities(project_id,referring_domain,source_url,target_url,anchor_text,opportunity_type,priority,status,authority,notes) VALUES(?,?,?,?,?,?,?,?,?,?)`,[p.id,b.referring_domain,b.source_url||null,b.target_url||p.website_url,b.anchor_text||null,b.opportunity_type||'other',b.priority||'medium',b.status||'open',b.authority??null,b.notes||null]);res.status(201).json({success:true,id:r.insertId,message:'Backlink opportunity saved'});}catch(e){console.error(e);res.status(500).json({success:false,message:'Unable to save opportunity'});}
 };
 
 module.exports={createCompetitor,getCompetitors,getCompetitorById,updateCompetitor,deleteCompetitor,getCompetitorIntelligence,createCompetitorKeyword,createCompetitorBacklink,createOpportunity};
