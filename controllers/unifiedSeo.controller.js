@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { getPerformanceData } = require('../services/googleSearchConsole.service');
+const { ensureTable: ensureGa4Table } = require('../services/googleAnalytics4.service');
 
 async function getOwnedProject(projectId, userId) {
   const [rows] = await db.execute(
@@ -101,6 +102,7 @@ function aggregateKeywordRows(rows = []) {
 async function keywords(req, res) {
   try {
     const projectId = Number(req.params.projectId);
+    await ensureGa4Table();
     const project = await getOwnedProject(projectId, req.user.userId);
     if (!project) return fail(res, 404, 'Project not found');
 
@@ -365,6 +367,7 @@ async function overview(req, res) {
 async function listConnections(req, res) {
   try {
     const projectId = Number(req.params.projectId);
+    await ensureGa4Table();
     if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
     const [ga4] = await db.execute('SELECT id, property_id, property_name, status, last_synced_at FROM ga4_connections WHERE project_id = ?', [projectId]);
     const [gbp] = await db.execute('SELECT id, account_id, location_id, location_name, status, last_synced_at FROM gbp_connections WHERE project_id = ?', [projectId]);
