@@ -122,10 +122,23 @@ async function keywords(req, res) {
     let gscError = null;
 
     try {
-      [currentResult, previousResult] = await Promise.all([
-        getPerformanceData(projectId, range.startDate, range.endDate, selectedCountry ? 'query' : ['query', 'country'], dataState, selectedCountry),
-        getPerformanceData(projectId, previous.startDate, previous.endDate, selectedCountry ? 'query' : ['query', 'country'], dataState, selectedCountry),
+      // Keep the aggregate GSC totals on the same endpoint/date scope as the
+      // GSC dashboard. Query-level rows are a separate dimension and can be
+      // smaller because Search Console omits anonymized/rare queries.
+      const queryDimensions = selectedCountry ? 'query' : ['query', 'country'];
+      const countryDimensions = 'country';
+      const [currentQuery, previousQuery, currentAggregate, previousAggregate, currentCountry] = await Promise.all([
+        getPerformanceData(projectId, range.startDate, range.endDate, queryDimensions, dataState, selectedCountry),
+        getPerformanceData(projectId, previous.startDate, previous.endDate, queryDimensions, dataState, selectedCountry),
+        getPerformanceData(projectId, range.startDate, range.endDate, 'date', dataState, selectedCountry),
+        getPerformanceData(projectId, previous.startDate, previous.endDate, 'date', dataState, selectedCountry),
+        getPerformanceData(projectId, range.startDate, range.endDate, countryDimensions, dataState, selectedCountry),
       ]);
+      currentResult = currentQuery;
+      previousResult = previousQuery;
+      currentResult.aggregate = currentAggregate;
+      previousResult.aggregate = previousAggregate;
+      currentResult.countryBreakdown = currentCountry;
     } catch (error) {
       gscError = error.message || 'Google Search Console data unavailable';
       console.warn('SEO KEYWORDS GSC WARNING:', gscError);
@@ -135,6 +148,22 @@ async function keywords(req, res) {
     const previousRawRows = mapKeywordRows(previousResult.rows);
     const currentRows = aggregateKeywordRows(currentRawRows);
     const previousRows = aggregateKeywordRows(previousRawRows);
+
+    // The aggregate/date report is the authoritative total used by the GSC
+    // dashboard. Query rows are intentionally not forced to add up to it:
+    // Google can omit anonymized/rare queries from query-level results.
+    const aggregateSummary = currentResult.aggregate?.summary || { clicks: 0, impressions: 0, ctr: 0, ctrPercent: 0, position: 0 };
+    const previousAggregateSummary = previousResult.aggregate?.summary || { clicks: 0, impressions: 0, ctr: 0, ctrPercent: 0, position: 0 };
+    const queryLevelSummary = currentRows.reduce((acc, row) => {
+      acc.clicks += row.clicks;
+      acc.impressions += row.impressions;
+      acc.weightedPosition += (row.position || 0) * row.impressions;
+      return acc;
+    }, { clicks: 0, impressions: 0, weightedPosition: 0 });
+    const unattributed = {
+      clicks: Math.max(0, Number(aggregateSummary.clicks || 0) - queryLevelSummary.clicks),
+      impressions: Math.max(0, Number(aggregateSummary.impressions || 0) - queryLevelSummary.impressions),
+    };
     const currentMap = new Map(currentRows.map((row) => [row.keyword.toLowerCase(), row]));
     const previousMap = new Map(previousRows.map((row) => [row.keyword.toLowerCase(), row]));
     const resultMap = new Map();
@@ -217,37 +246,23 @@ async function keywords(req, res) {
     const result = Array.from(resultMap.values());
     result.sort((a, b) => b.impressions - a.impressions || (a.position ?? 9999) - (b.position ?? 9999) || a.keyword.localeCompare(b.keyword));
 
-    const summary = currentRows.reduce((acc, row) => {
-      acc.clicks += row.clicks;
-      acc.impressions += row.impressions;
-      acc.weightedPosition += (row.position || 0) * row.impressions;
-      return acc;
-    }, { clicks: 0, impressions: 0, weightedPosition: 0 });
+    const totalCtr = Number(aggregateSummary.ctrPercent || 0);
+    const averagePosition = Number(aggregateSummary.position || 0);
 
-    const totalCtr = summary.impressions ? (summary.clicks / summary.impressions) * 100 : 0;
-    const averagePosition = summary.impressions ? summary.weightedPosition / summary.impressions : 0;
+    // Country totals come from the country dimension rather than query rows,
+    // so a country can still be displayed when the associated query is
+    // anonymized by Google.
+    const countryApiRows = currentResult.countryBreakdown?.rows || [];
+    const countries = countryApiRows.map((row) => ({
+      country: row?.keys?.[0] || null,
+      clicks: Number(row.clicks || 0),
+      impressions: Number(row.impressions || 0),
+      ctr: Number(row.ctr || 0) * 100,
+      position: row.impressions ? Number(row.position || 0) : null,
+    })).filter((row) => row.country).sort((a,b) => b.impressions - a.impressions);
 
-    const countryRows = selectedCountry
-      ? currentRawRows
-      : currentRawRows.reduce((acc, row) => {
-          if (!row.country) return acc;
-          const existing = acc.find((x) => x.country === row.country);
-          if (existing) {
-            existing.clicks += row.clicks;
-            existing.impressions += row.impressions;
-            existing.weightedPosition += row.position * row.impressions;
-          } else {
-            acc.push({ country: row.country, clicks: row.clicks, impressions: row.impressions, weightedPosition: row.position * row.impressions });
-          }
-          return acc;
-        }, []);
-    const countries = countryRows.map((row) => ({
-      country: row.country,
-      clicks: row.clicks,
-      impressions: row.impressions,
-      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
-      position: row.impressions ? row.weightedPosition / row.impressions : null,
-    })).sort((a,b) => b.impressions - a.impressions);
+    const queryLevelImpressions = queryLevelSummary.impressions;
+    const queryLevelClicks = queryLevelSummary.clicks;
 
     return res.json({
       success: true,
@@ -268,10 +283,14 @@ async function keywords(req, res) {
       summary: {
         keywords: trackedRows.length,
         visibleKeywords: result.length,
-        clicks: summary.clicks,
-        impressions: summary.impressions,
+        clicks: Number(aggregateSummary.clicks || 0),
+        impressions: Number(aggregateSummary.impressions || 0),
         ctr: totalCtr,
         averagePosition,
+        queryLevelClicks,
+        queryLevelImpressions,
+        unattributedClicks: unattributed.clicks,
+        unattributedImpressions: unattributed.impressions,
         improving: result.filter((r) => r.trend === 'improving').length,
         declining: result.filter((r) => r.trend === 'declining').length,
         new: result.filter((r) => r.trend === 'new').length,
@@ -279,6 +298,27 @@ async function keywords(req, res) {
       },
       countries,
       keywords: result,
+      gscAggregate: {
+        clicks: Number(aggregateSummary.clicks || 0),
+        impressions: Number(aggregateSummary.impressions || 0),
+        ctr: Number(aggregateSummary.ctrPercent || 0),
+        position: Number(aggregateSummary.position || 0),
+      },
+      previousGscAggregate: {
+        clicks: Number(previousAggregateSummary.clicks || 0),
+        impressions: Number(previousAggregateSummary.impressions || 0),
+        ctr: Number(previousAggregateSummary.ctrPercent || 0),
+        position: Number(previousAggregateSummary.position || 0),
+      },
+      queryLevel: {
+        clicks: queryLevelClicks,
+        impressions: queryLevelImpressions,
+        unattributedClicks: unattributed.clicks,
+        unattributedImpressions: unattributed.impressions,
+        note: unattributed.impressions > 0 || unattributed.clicks > 0
+          ? 'Some GSC totals are not attributable to a query because Search Console omits anonymized/rare queries from query-level rows.'
+          : null,
+      },
     });
   } catch (error) {
     console.error('SEO KEYWORDS ERROR:', error);
