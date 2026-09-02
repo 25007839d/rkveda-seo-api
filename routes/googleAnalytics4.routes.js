@@ -1,0 +1,10 @@
+const express=require('express');
+const auth=require('../middleware/auth.middleware');
+const c=require('../controllers/googleAnalytics4.controller');
+const router=express.Router();
+router.get('/projects/:projectId/ga4/connect',auth,c.connect);
+router.get('/projects/:projectId/ga4/status',auth,c.status);
+router.get('/projects/:projectId/ga4/performance',auth,c.performance);
+router.post('/projects/:projectId/ga4/history/sync',auth,c.sync);
+router.get('/projects/:projectId/ga4/history',auth,c.history);
+module.exports=router;
