@@ -339,56 +339,46 @@ const getBacklinkOpportunities = async (req, res) => {
         await ensureBacklinkOpportunitiesTable();
         const user_id = req.user.userId;
         const project_id = req.params.projectId;
-        const [projects] = await db.execute(`SELECT id FROM seo_projects WHERE id=? AND user_id=?`, [project_id,user_id]);
+        const [projects] = await db.execute(`SELECT id,website_url,domain FROM seo_projects WHERE id=? AND user_id=?`, [project_id,user_id]);
         if (!projects.length) return res.status(404).json({success:false,message:'Project not found'});
+        const project=projects[0];
         const [rows] = await db.execute(`SELECT * FROM backlink_opportunities WHERE project_id=? ORDER BY FIELD(priority,'critical','high','medium','low'), created_at DESC`, [project_id]);
 
-        // Generate unsaved opportunities from competitor backlink observations and
-        // lost owned backlinks. These are suggestions only; they are not claimed
-        // as independently discovered backlinks.
+        const hostOf=(value)=>{try{return new URL(String(value||'')).hostname.toLowerCase().replace(/^www\./,'')}catch{return String(value||'').trim().toLowerCase().replace(/^www\./,'')}};
+        const ownHost=hostOf(project.domain||project.website_url);
         const [competitorLinks] = await db.execute(`
-            SELECT cb.source_url, cb.target_url, cb.anchor_text, cb.domain_authority,
+            SELECT cb.source_url, cb.target_url, cb.anchor_text, cb.domain_authority, cb.status,
                    c.competitor_domain
             FROM competitor_backlinks cb
-            INNER JOIN competitors c ON c.id = cb.competitor_id
+            INNER JOIN competitors c ON c.id=cb.competitor_id
             WHERE c.project_id=?
         `, [project_id]);
-        const [ownedLinks] = await db.execute(`SELECT source_url FROM backlinks WHERE project_id=?`, [project_id]);
-        const ownHosts = new Set(ownedLinks.map(x => { try { return new URL(x.source_url).hostname.toLowerCase(); } catch { return String(x.source_url||'').toLowerCase(); } }));
-        const savedHosts = new Set(rows.map(x => String(x.referring_domain||'').toLowerCase()));
+        const [ownedLinks] = await db.execute(`SELECT source_url,status FROM backlinks WHERE project_id=?`, [project_id]);
+        const ownHosts = new Set(ownedLinks.map(x=>hostOf(x.source_url)).filter(Boolean));
+        if(ownHost) ownHosts.add(ownHost);
+        const savedHosts = new Set(rows.map(x=>hostOf(x.referring_domain)).filter(Boolean));
         const generatedMap = new Map();
         for (const link of competitorLinks) {
-            let host=''; try { host=new URL(link.source_url).hostname.toLowerCase(); } catch {}
+            const host=hostOf(link.source_url);
             if (!host || ownHosts.has(host) || savedHosts.has(host)) continue;
-            generatedMap.set(host, {
-                id: null,
-                referring_domain: host,
-                source_url: link.source_url,
-                target_url: null,
-                anchor_text: link.anchor_text || null,
-                opportunity_type: 'competitor_link',
-                priority: Number(link.domain_authority||0) >= 70 ? 'high' : 'medium',
-                status: 'open',
-                authority: link.domain_authority == null ? null : Number(link.domain_authority),
-                notes: `Observed on competitor ${link.competitor_domain}`
-            });
+            const item=generatedMap.get(host)||{
+                id:null,referring_domain:host,source_url:link.source_url,target_url:project.website_url,
+                anchor_text:link.anchor_text||null,opportunity_type:'competitor_link',status:'open',authority:null,
+                competitor_count:0,competitors:[],notes:''
+            };
+            if(link.domain_authority!=null && (item.authority==null || Number(link.domain_authority)>item.authority)) item.authority=Number(link.domain_authority);
+            if(!item.source_url) item.source_url=link.source_url;
+            if(!item.competitors.includes(link.competitor_domain)) item.competitors.push(link.competitor_domain);
+            item.competitor_count=item.competitors.length;
+            item.priority=item.competitor_count>=2?'critical':Number(item.authority||0)>=80?'critical':Number(item.authority||0)>=60?'high':'medium';
+            item.notes=`Observed linking to ${item.competitor_count} tracked competitor${item.competitor_count===1?'':'s'}.`;
+            generatedMap.set(host,item);
         }
         const [lostLinks] = await db.execute(`SELECT source_url,target_url,anchor_text,domain_authority FROM backlinks WHERE project_id=? AND status='lost'`, [project_id]);
         for (const link of lostLinks) {
-            let host=''; try { host=new URL(link.source_url).hostname.toLowerCase(); } catch {}
-            if (!host || savedHosts.has(host) || generatedMap.has(host)) continue;
-            generatedMap.set(host, {
-                id: null,
-                referring_domain: host,
-                source_url: link.source_url,
-                target_url: link.target_url || null,
-                anchor_text: link.anchor_text || null,
-                opportunity_type: 'lost_link',
-                priority: Number(link.domain_authority||0) >= 70 ? 'high' : 'medium',
-                status: 'open',
-                authority: link.domain_authority == null ? null : Number(link.domain_authority),
-                notes: 'Recovery candidate from a lost backlink'
-            });
+            const host=hostOf(link.source_url);
+            if (!host || ownHost===host || savedHosts.has(host) || generatedMap.has(host)) continue;
+            generatedMap.set(host,{id:null,referring_domain:host,source_url:link.source_url,target_url:link.target_url||project.website_url,anchor_text:link.anchor_text||null,opportunity_type:'lost_link',priority:Number(link.domain_authority||0)>=80?'high':'medium',status:'open',authority:link.domain_authority==null?null:Number(link.domain_authority),competitor_count:0,competitors:[],notes:'Recovery candidate from a lost owned backlink'});
         }
         const opportunities=[...rows,...generatedMap.values()];
         res.json({success:true,count:opportunities.length,savedCount:rows.length,generatedCount:generatedMap.size,opportunities});
