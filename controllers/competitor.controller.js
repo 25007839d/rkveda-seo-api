@@ -159,7 +159,7 @@ const getCompetitorIntelligence = async (req,res) => {
       if(host && !ownDomains.has(host)) opportunityMap.set(host,{referring_domain:host,source_url:b.source_url,target_url:project.website_url,anchor_text:b.anchor_text,authority:b.domain_authority,opportunity_type:'competitor_link',priority:Number(b.domain_authority||0)>=70?'high':'medium',status:'open'});
     }
     const [savedOpps]=await db.execute(`SELECT * FROM backlink_opportunities WHERE project_id=? ORDER BY FIELD(priority,'critical','high','medium','low'),created_at DESC`,[projectId]);
-    const savedHosts=new Set(savedOpps.map(o=>o.referring_domain.toLowerCase()));
+    const savedHosts=new Set(savedOpps.map(o=>String(o.referring_domain||'').toLowerCase()));
     const generated=[...opportunityMap.values()].filter(o=>!savedHosts.has(o.referring_domain));
     const ownKeywordSet=new Set(ownKeywords.map(x=>x.keyword.trim().toLowerCase()));
     const keywordGaps=keywords.filter(k=>!ownKeywordSet.has(k.keyword.trim().toLowerCase()));

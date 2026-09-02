@@ -369,7 +369,13 @@ function summarizeRows(rows = []) {
     };
 }
 
-async function queryPerformance(connection, startDate, endDate, dimensions, dataState = "final", rowLimit = 25000) {
+async function queryPerformance(connection, startDate, endDate, dimensions, dataState = "final", rowLimit = 25000, country = null) {
+    // If a country filter is selected, include country in the returned keys as
+    // well. This lets the UI explain exactly where the impressions came from.
+    if (country && String(country).toLowerCase() !== "all" && !dimensions.includes("country")) {
+        dimensions = [...dimensions, "country"];
+    }
+
     const oauth2Client = createOAuthClient();
     oauth2Client.setCredentials({
         access_token: connection.access_token,
@@ -398,16 +404,31 @@ async function queryPerformance(connection, startDate, endDate, dimensions, data
     }
 
     const searchconsole = google.searchconsole({ version: "v1", auth: oauth2Client });
+    const requestBody = {
+        startDate,
+        endDate,
+        dimensions,
+        rowLimit,
+        dataState,
+        type: "web"
+    };
+
+    // GSC country values are ISO 3166-1 alpha-3 codes (for example `ind`).
+    // Omit the filter for "all" so the API returns all countries.
+    if (country && String(country).toLowerCase() !== "all") {
+        requestBody.dimensionFilterGroups = [{
+            groupType: "and",
+            filters: [{
+                dimension: "country",
+                operator: "equals",
+                expression: String(country).trim().toLowerCase()
+            }]
+        }];
+    }
+
     const response = await searchconsole.searchanalytics.query({
         siteUrl: connection.property_url,
-        requestBody: {
-            startDate,
-            endDate,
-            dimensions,
-            rowLimit,
-            dataState,
-            type: "web"
-        }
+        requestBody
     });
 
     return response.data.rows || [];
@@ -523,7 +544,8 @@ async function getPerformanceData(
     startDate,
     endDate,
     dimension = "date",
-    dataState = "final"
+    dataState = "final",
+    country = null
 ) {
     const connection = await getGSCConnection(projectId);
 
@@ -535,13 +557,18 @@ async function getPerformanceData(
         throw new Error("Google authentication tokens are missing");
     }
 
+    const dimensions = Array.isArray(dimension)
+        ? dimension
+        : String(dimension || "date").split(",").map((item) => item.trim()).filter(Boolean);
+
     const rows = await queryPerformance(
         connection,
         startDate,
         endDate,
-        [dimension],
+        dimensions,
         dataState,
-        25000
+        25000,
+        country
     );
 
     // Keep daily history automatically whenever the main performance endpoint is used.
@@ -558,8 +585,9 @@ async function getPerformanceData(
         propertyUrl: connection.property_url,
         startDate,
         endDate,
-        dimension,
+        dimension: dimensions,
         dataState,
+        country: country || "all",
         rows,
         summary: summarizeRows(rows),
         lastSync: dimension === "date" ? await getLastHistorySync(projectId) : undefined

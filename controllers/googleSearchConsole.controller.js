@@ -302,10 +302,19 @@ async function performance(req, res) {
             return res.status(404).json({ success: false, message: "Project not found" });
         }
 
-        const end = req.query.endDate ? new Date(`${req.query.endDate}T00:00:00Z`) : new Date();
+        // Keep the API default identical to the GSC UI: yesterday through
+        // the previous N-1 days. This avoids timezone-related one-day drift.
+        const end = req.query.endDate
+            ? new Date(`${req.query.endDate}T00:00:00Z`)
+            : (() => {
+                const d = new Date();
+                d.setUTCHours(0, 0, 0, 0);
+                d.setUTCDate(d.getUTCDate() - 1);
+                return d;
+            })();
         const start = req.query.startDate
             ? new Date(`${req.query.startDate}T00:00:00Z`)
-            : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+            : new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
 
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
             return res.status(400).json({ success: false, message: "Invalid startDate or endDate" });
@@ -314,6 +323,9 @@ async function performance(req, res) {
         const formatDate = (date) => date.toISOString().slice(0, 10);
         const dimension = req.query.dimension || "date";
         const dataState = req.query.dataState === "all" ? "all" : "final";
+        const country = req.query.country && String(req.query.country).toLowerCase() !== "all"
+            ? String(req.query.country).trim().toLowerCase()
+            : null;
 
         if (!["date", "query", "page", "country", "device", "searchAppearance"].includes(dimension)) {
             return res.status(400).json({ success: false, message: "Unsupported GSC dimension" });
@@ -329,7 +341,8 @@ async function performance(req, res) {
             formatDate(start),
             formatDate(end),
             dimension,
-            dataState
+            dataState,
+            country
         );
 
         return res.json({ success: true, ...result });

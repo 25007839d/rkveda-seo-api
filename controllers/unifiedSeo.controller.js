@@ -33,15 +33,69 @@ function previousPeriod({ startDate, endDate }) {
   return { startDate: previousStart.toISOString().slice(0, 10), endDate: previousEnd.toISOString().slice(0, 10) };
 }
 
+function normalizeGscCountry(value) {
+  if (!value) return null;
+  const raw = String(value).trim().toLowerCase();
+  return raw === 'all' ? null : raw;
+}
+
 function mapKeywordRows(rows = []) {
   return rows.map((row) => ({
     keyword: row?.keys?.[0] || '',
+    country: row?.keys?.[1] || null,
     clicks: Number(row.clicks || 0),
     impressions: Number(row.impressions || 0),
     ctr: Number(row.ctr || 0),
     ctrPercent: Number(row.ctr || 0) * 100,
     position: Number(row.position || 0),
   })).filter((row) => row.keyword);
+}
+
+function aggregateKeywordRows(rows = []) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = row.keyword.toLowerCase();
+    let item = grouped.get(key);
+    if (!item) {
+      item = {
+        keyword: row.keyword,
+        clicks: 0,
+        impressions: 0,
+        weightedPosition: 0,
+        countries: new Map(),
+      };
+      grouped.set(key, item);
+    }
+    item.clicks += row.clicks;
+    item.impressions += row.impressions;
+    item.weightedPosition += row.position * row.impressions;
+    if (row.country) {
+      const country = row.country.toLowerCase();
+      const c = item.countries.get(country) || { clicks: 0, impressions: 0, positionWeight: 0 };
+      c.clicks += row.clicks;
+      c.impressions += row.impressions;
+      c.positionWeight += row.position * row.impressions;
+      item.countries.set(country, c);
+    }
+  }
+  return [...grouped.values()].map((item) => {
+    const topCountry = [...item.countries.entries()].sort((a,b) => b[1].impressions - a[1].impressions)[0];
+    return {
+      keyword: item.keyword,
+      clicks: item.clicks,
+      impressions: item.impressions,
+      ctr: item.impressions ? item.clicks / item.impressions : 0,
+      ctrPercent: item.impressions ? (item.clicks / item.impressions) * 100 : 0,
+      position: item.impressions ? item.weightedPosition / item.impressions : null,
+      country: topCountry?.[0] || null,
+      countries: [...item.countries.entries()].map(([code, v]) => ({
+        code,
+        clicks: v.clicks,
+        impressions: v.impressions,
+        position: v.impressions ? v.positionWeight / v.impressions : null,
+      })).sort((a,b) => b.impressions - a.impressions),
+    };
+  });
 }
 
 async function keywords(req, res) {
@@ -53,10 +107,8 @@ async function keywords(req, res) {
     const range = parseKeywordDateRange(req);
     const previous = previousPeriod(range);
     const dataState = req.query.dataState === 'all' ? 'all' : 'final';
+    const selectedCountry = normalizeGscCountry(req.query.country);
 
-    // Tracked keywords are the source of truth for the number of keywords a
-    // project manages. GSC query rows are enrichment data and may legitimately
-    // be empty (new site, no impressions, delayed GSC data, etc.).
     const [trackedRows] = await db.execute(
       `SELECT id, keyword, search_engine, country, language, target_url, created_at
        FROM keywords
@@ -71,21 +123,22 @@ async function keywords(req, res) {
 
     try {
       [currentResult, previousResult] = await Promise.all([
-        getPerformanceData(projectId, range.startDate, range.endDate, 'query', dataState),
-        getPerformanceData(projectId, previous.startDate, previous.endDate, 'query', dataState),
+        getPerformanceData(projectId, range.startDate, range.endDate, selectedCountry ? 'query' : ['query', 'country'], dataState, selectedCountry),
+        getPerformanceData(projectId, previous.startDate, previous.endDate, selectedCountry ? 'query' : ['query', 'country'], dataState, selectedCountry),
       ]);
     } catch (error) {
       gscError = error.message || 'Google Search Console data unavailable';
       console.warn('SEO KEYWORDS GSC WARNING:', gscError);
     }
 
-    const currentRows = mapKeywordRows(currentResult.rows);
-    const previousRows = mapKeywordRows(previousResult.rows);
+    const currentRawRows = mapKeywordRows(currentResult.rows);
+    const previousRawRows = mapKeywordRows(previousResult.rows);
+    const currentRows = aggregateKeywordRows(currentRawRows);
+    const previousRows = aggregateKeywordRows(previousRawRows);
     const currentMap = new Map(currentRows.map((row) => [row.keyword.toLowerCase(), row]));
     const previousMap = new Map(previousRows.map((row) => [row.keyword.toLowerCase(), row]));
     const resultMap = new Map();
 
-    // Start with tracked keywords so they are visible even when GSC has no row.
     for (const tracked of trackedRows) {
       const key = String(tracked.keyword || '').trim().toLowerCase();
       if (!key) continue;
@@ -107,12 +160,13 @@ async function keywords(req, res) {
         trend = 'new';
       }
       resultMap.set(key, {
-        ...row,
+        ...(row || {}),
         keyword: tracked.keyword,
         keywordId: tracked.id,
         targetUrl: tracked.target_url,
         searchEngine: tracked.search_engine,
-        country: tracked.country,
+        trackedCountry: tracked.country,
+        country: selectedCountry || row?.country || tracked.country || null,
         language: tracked.language,
         tracked: true,
         hasGscData: hasGsc,
@@ -129,7 +183,6 @@ async function keywords(req, res) {
       });
     }
 
-    // Also show GSC queries that are not manually tracked.
     for (const row of currentRows) {
       const key = row.keyword.toLowerCase();
       if (resultMap.has(key)) continue;
@@ -148,7 +201,8 @@ async function keywords(req, res) {
         keywordId: null,
         targetUrl: null,
         searchEngine: 'google',
-        country: null,
+        trackedCountry: null,
+        country: selectedCountry || row.country || null,
         language: null,
         tracked: false,
         hasGscData: true,
@@ -163,16 +217,37 @@ async function keywords(req, res) {
     const result = Array.from(resultMap.values());
     result.sort((a, b) => b.impressions - a.impressions || (a.position ?? 9999) - (b.position ?? 9999) || a.keyword.localeCompare(b.keyword));
 
-    const gscRows = currentRows;
-    const summary = gscRows.reduce((acc, row) => {
+    const summary = currentRows.reduce((acc, row) => {
       acc.clicks += row.clicks;
       acc.impressions += row.impressions;
-      acc.weightedPosition += row.position * row.impressions;
+      acc.weightedPosition += (row.position || 0) * row.impressions;
       return acc;
     }, { clicks: 0, impressions: 0, weightedPosition: 0 });
 
     const totalCtr = summary.impressions ? (summary.clicks / summary.impressions) * 100 : 0;
     const averagePosition = summary.impressions ? summary.weightedPosition / summary.impressions : 0;
+
+    const countryRows = selectedCountry
+      ? currentRawRows
+      : currentRawRows.reduce((acc, row) => {
+          if (!row.country) return acc;
+          const existing = acc.find((x) => x.country === row.country);
+          if (existing) {
+            existing.clicks += row.clicks;
+            existing.impressions += row.impressions;
+            existing.weightedPosition += row.position * row.impressions;
+          } else {
+            acc.push({ country: row.country, clicks: row.clicks, impressions: row.impressions, weightedPosition: row.position * row.impressions });
+          }
+          return acc;
+        }, []);
+    const countries = countryRows.map((row) => ({
+      country: row.country,
+      clicks: row.clicks,
+      impressions: row.impressions,
+      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+      position: row.impressions ? row.weightedPosition / row.impressions : null,
+    })).sort((a,b) => b.impressions - a.impressions);
 
     return res.json({
       success: true,
@@ -183,6 +258,7 @@ async function keywords(req, res) {
       previousStartDate: previous.startDate,
       previousEndDate: previous.endDate,
       dataState,
+      country: selectedCountry || 'all',
       source: 'tracked_keywords_plus_google_search_console',
       gscAvailable: !gscError,
       gscError,
@@ -201,6 +277,7 @@ async function keywords(req, res) {
         new: result.filter((r) => r.trend === 'new').length,
         noData: result.filter((r) => r.trend === 'no_data').length,
       },
+      countries,
       keywords: result,
     });
   } catch (error) {

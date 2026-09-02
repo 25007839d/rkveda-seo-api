@@ -342,7 +342,56 @@ const getBacklinkOpportunities = async (req, res) => {
         const [projects] = await db.execute(`SELECT id FROM seo_projects WHERE id=? AND user_id=?`, [project_id,user_id]);
         if (!projects.length) return res.status(404).json({success:false,message:'Project not found'});
         const [rows] = await db.execute(`SELECT * FROM backlink_opportunities WHERE project_id=? ORDER BY FIELD(priority,'critical','high','medium','low'), created_at DESC`, [project_id]);
-        res.json({success:true,count:rows.length,opportunities:rows});
+
+        // Generate unsaved opportunities from competitor backlink observations and
+        // lost owned backlinks. These are suggestions only; they are not claimed
+        // as independently discovered backlinks.
+        const [competitorLinks] = await db.execute(`
+            SELECT cb.source_url, cb.target_url, cb.anchor_text, cb.domain_authority,
+                   c.competitor_domain
+            FROM competitor_backlinks cb
+            INNER JOIN competitors c ON c.id = cb.competitor_id
+            WHERE c.project_id=?
+        `, [project_id]);
+        const [ownedLinks] = await db.execute(`SELECT source_url FROM backlinks WHERE project_id=?`, [project_id]);
+        const ownHosts = new Set(ownedLinks.map(x => { try { return new URL(x.source_url).hostname.toLowerCase(); } catch { return String(x.source_url||'').toLowerCase(); } }));
+        const savedHosts = new Set(rows.map(x => String(x.referring_domain||'').toLowerCase()));
+        const generatedMap = new Map();
+        for (const link of competitorLinks) {
+            let host=''; try { host=new URL(link.source_url).hostname.toLowerCase(); } catch {}
+            if (!host || ownHosts.has(host) || savedHosts.has(host)) continue;
+            generatedMap.set(host, {
+                id: null,
+                referring_domain: host,
+                source_url: link.source_url,
+                target_url: null,
+                anchor_text: link.anchor_text || null,
+                opportunity_type: 'competitor_link',
+                priority: Number(link.domain_authority||0) >= 70 ? 'high' : 'medium',
+                status: 'open',
+                authority: link.domain_authority == null ? null : Number(link.domain_authority),
+                notes: `Observed on competitor ${link.competitor_domain}`
+            });
+        }
+        const [lostLinks] = await db.execute(`SELECT source_url,target_url,anchor_text,domain_authority FROM backlinks WHERE project_id=? AND status='lost'`, [project_id]);
+        for (const link of lostLinks) {
+            let host=''; try { host=new URL(link.source_url).hostname.toLowerCase(); } catch {}
+            if (!host || savedHosts.has(host) || generatedMap.has(host)) continue;
+            generatedMap.set(host, {
+                id: null,
+                referring_domain: host,
+                source_url: link.source_url,
+                target_url: link.target_url || null,
+                anchor_text: link.anchor_text || null,
+                opportunity_type: 'lost_link',
+                priority: Number(link.domain_authority||0) >= 70 ? 'high' : 'medium',
+                status: 'open',
+                authority: link.domain_authority == null ? null : Number(link.domain_authority),
+                notes: 'Recovery candidate from a lost backlink'
+            });
+        }
+        const opportunities=[...rows,...generatedMap.values()];
+        res.json({success:true,count:opportunities.length,savedCount:rows.length,generatedCount:generatedMap.size,opportunities});
     } catch(error){ console.error('Get backlink opportunities error:',error); res.status(500).json({success:false,message:'Unable to load backlink opportunities'}); }
 };
 
