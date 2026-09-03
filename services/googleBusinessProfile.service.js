@@ -60,8 +60,22 @@ async function ensureTables() {
   ) ENGINE=InnoDB`);
 }
 
+function getGbpRedirectUri() {
+  const uri = String(process.env.GOOGLE_GBP_REDIRECT_URI || '').trim();
+  if (!uri) {
+    const err = new Error('Google Business Profile OAuth redirect URI is not configured. Set GOOGLE_GBP_REDIRECT_URI to the GBP callback URL.');
+    err.code = 'GBP_REDIRECT_URI_NOT_CONFIGURED';
+    throw err;
+  }
+  return uri;
+}
+
 function oauthClient() {
-  return new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, process.env.GOOGLE_GBP_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI);
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    getGbpRedirectUri()
+  );
 }
 function authorizationUrl(state) {
   return oauthClient().generateAuthUrl({ access_type:'offline', prompt:'consent', include_granted_scopes:true, scope:[SCOPE], state });
