@@ -1,6 +1,6 @@
 {
   "name": "rkveda-seo-api",
-  "version": "1.0.0",
+  "version": "3.8.0",
   "description": "RKVeda SEO platform backend API",
   "main": "server.js",
   "scripts": {
