@@ -1,6 +1,5 @@
 const db = require('../config/database');
 const { getPerformanceData } = require('../services/googleSearchConsole.service');
-const { ensureTable: ensureGa4Table } = require('../services/googleAnalytics4.service');
 
 async function getOwnedProject(projectId, userId) {
   const [rows] = await db.execute(
@@ -102,7 +101,6 @@ function aggregateKeywordRows(rows = []) {
 async function keywords(req, res) {
   try {
     const projectId = Number(req.params.projectId);
-    await ensureGa4Table();
     const project = await getOwnedProject(projectId, req.user.userId);
     if (!project) return fail(res, 404, 'Project not found');
 
@@ -345,7 +343,7 @@ async function overview(req, res) {
     const [[content]] = await db.execute('SELECT COUNT(*) AS count FROM content_plans WHERE project_id = ?', [projectId]);
     const [[recommendations]] = await db.execute("SELECT COUNT(*) AS count FROM seo_ai_recommendations WHERE project_id = ? AND status IN ('open','in_progress')", [projectId]);
     const [[gsc]] = await db.execute('SELECT status, property_url, updated_at AS last_synced_at FROM google_search_console_connections WHERE project_id = ?', [projectId]);
-    const [[ga4]] = await db.execute('SELECT status, property_name, last_synced_at FROM ga4_connections WHERE project_id = ?', [projectId]);
+    const [[ga4]] = await db.execute('SELECT status, property_name, updated_at AS last_synced_at FROM google_analytics_connections WHERE project_id = ?', [projectId]);
     const [[gbp]] = await db.execute('SELECT status, location_name, last_synced_at FROM gbp_connections WHERE project_id = ?', [projectId]);
     const [social] = await db.execute('SELECT platform, status, account_name, last_synced_at FROM social_connections WHERE project_id = ? ORDER BY platform', [projectId]);
 
@@ -367,9 +365,8 @@ async function overview(req, res) {
 async function listConnections(req, res) {
   try {
     const projectId = Number(req.params.projectId);
-    await ensureGa4Table();
     if (!await getOwnedProject(projectId, req.user.userId)) return fail(res, 404, 'Project not found');
-    const [ga4] = await db.execute('SELECT id, property_id, property_name, status, last_synced_at FROM ga4_connections WHERE project_id = ?', [projectId]);
+    const [ga4] = await db.execute('SELECT id, property_id, property_name, status, updated_at AS last_synced_at FROM google_analytics_connections WHERE project_id = ?', [projectId]);
     const [gbp] = await db.execute('SELECT id, account_id, location_id, location_name, status, last_synced_at FROM gbp_connections WHERE project_id = ?', [projectId]);
     const [social] = await db.execute('SELECT id, platform, account_id, account_name, status, last_synced_at FROM social_connections WHERE project_id = ? ORDER BY platform', [projectId]);
     return res.json({ success: true, ga4: ga4[0] || null, gbp: gbp[0] || null, social });
@@ -384,7 +381,7 @@ async function upsertIntegration(req, res) {
     const body = req.body || {};
     if (!['ga4','gbp'].includes(type)) return fail(res, 400, 'Unsupported integration');
 
-    const table = type === 'ga4' ? 'ga4_connections' : 'gbp_connections';
+    const table = type === 'ga4' ? 'google_analytics_connections' : 'gbp_connections';
     const fields = type === 'ga4'
       ? ['property_id','property_name','access_token','refresh_token','token_expiry','status']
       : ['account_id','location_id','location_name','access_token','refresh_token','token_expiry','status'];

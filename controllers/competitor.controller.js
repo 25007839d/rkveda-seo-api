@@ -1,4 +1,5 @@
 const db = require("../config/database");
+const competitorSync = require("../services/competitorSync.service");
 
 async function ensureCompetitorIntelligenceTables() {
   await db.query(`
@@ -141,4 +142,25 @@ const updateOpportunity=async(req,res)=>{try{const p=await verifyProject(req.use
 const deleteOpportunity=async(req,res)=>{try{const p=await verifyProject(req.user.userId,req.params.projectId);if(!p)return res.status(404).json({success:false,message:'Project not found'});const [r]=await db.execute(`DELETE FROM backlink_opportunities WHERE id=? AND project_id=?`,[req.params.id,p.id]);if(!r.affectedRows)return res.status(404).json({success:false,message:'Opportunity not found'});res.json({success:true,message:'Opportunity deleted'});}catch(e){res.status(500).json({success:false,message:'Unable to delete opportunity'});}};
 
 
-module.exports={createCompetitor,getCompetitors,getCompetitorById,updateCompetitor,deleteCompetitor,getCompetitorIntelligence,createCompetitorKeyword,updateCompetitorKeyword,deleteCompetitorKeyword,createCompetitorBacklink,updateCompetitorBacklink,deleteCompetitorBacklink,createOpportunity,updateOpportunity,deleteOpportunity};
+const syncCompetitorData = async (req,res) => {
+  try {
+    const projectId=req.params.projectId;
+    const type=['all','keywords','backlinks'].includes(req.body?.type) ? req.body.type : 'all';
+    const result=await competitorSync.syncCompetitor({userId:req.user.userId,projectId,competitorId:req.body?.competitorId||null,type,locationName:req.body?.locationName||'India',languageName:req.body?.languageName||'English',limit:req.body?.limit||100});
+    res.json({success:result.success,...result});
+  } catch(e) {
+    console.error('Competitor provider sync error:',e);
+    res.status(e.statusCode||500).json({success:false,code:e.code||'PROVIDER_SYNC_FAILED',message:e.message||'Unable to sync competitor data'});
+  }
+};
+const getCompetitorProviderStatus = async (req,res) => {
+  try {
+    const status=await competitorSync.getProviderStatus(req.params.projectId,req.user.userId);
+    res.json({success:true,...status});
+  } catch(e) {
+    console.error('Competitor provider status error:',e);
+    res.status(500).json({success:false,message:'Unable to load provider status'});
+  }
+};
+
+module.exports={createCompetitor,getCompetitors,getCompetitorById,updateCompetitor,deleteCompetitor,getCompetitorIntelligence,createCompetitorKeyword,updateCompetitorKeyword,deleteCompetitorKeyword,createCompetitorBacklink,updateCompetitorBacklink,deleteCompetitorBacklink,createOpportunity,updateOpportunity,deleteOpportunity,syncCompetitorData,getCompetitorProviderStatus};
