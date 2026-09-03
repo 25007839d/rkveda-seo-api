@@ -535,18 +535,6 @@ async function getPerformanceHistory(projectId, startDate, endDate) {
     };
 }
 
-
-async function disconnectConnection(projectId) {
-    if (!projectId) throw new Error("Project ID is required");
-    // Remove OAuth tokens/connection only. Historical performance cache remains intact.
-    await pool.execute(
-        `DELETE FROM google_search_console_connections WHERE project_id = ?`,
-        [projectId]
-    );
-    return { disconnected: true, projectId: Number(projectId) };
-}
-
-
 // ======================================================
 // GET GSC PERFORMANCE DATA
 // ======================================================
@@ -621,7 +609,6 @@ module.exports = {
     saveConnection,
 
     getConnection,
-    disconnectConnection,
 
     getPerformanceData,
 
