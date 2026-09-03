@@ -9,7 +9,8 @@ const {
     getPerformanceData,
     syncPerformanceHistory,
     getPerformanceHistory,
-    saveConnection
+    saveConnection,
+    disconnectConnection
 } = require("../services/googleSearchConsole.service");
 
 function normalizeHost(value) {
@@ -387,6 +388,19 @@ function parseDateRange(req, { capEndToYesterday = false } = {}) {
     return { startDate: formatDate(start), endDate: formatDate(end) };
 }
 
+async function disconnect(req, res) {
+    try {
+        const projectId = Number(req.params.projectId);
+        const project = await getProjectWebsite(projectId, req.user.userId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+        await disconnectConnection(projectId);
+        return res.json({ success: true, message: "Google Search Console disconnected. Historical data was kept.", projectId });
+    } catch (error) {
+        console.error("GSC DISCONNECT:", error);
+        return res.status(500).json({ success: false, message: error.message || "Unable to disconnect Google Search Console" });
+    }
+}
+
 async function syncHistory(req, res) {
     try {
         const projectId = req.params.projectId;
@@ -438,5 +452,6 @@ module.exports = {
     getStatus,
     performance,
     syncHistory,
-    history
+    history,
+    disconnect
 };

@@ -4,6 +4,7 @@ const c = require('../controllers/googleAnalytics.controller');
 const router = express.Router();
 router.get('/projects/:projectId/ga4/connect', auth, c.connect);
 router.get('/projects/:projectId/ga4/status', auth, c.status);
+router.post('/projects/:projectId/ga4/disconnect', auth, c.disconnect);
 router.get('/projects/:projectId/ga4/properties', auth, c.properties);
 router.post('/projects/:projectId/ga4/property', auth, c.selectProperty);
 router.get('/projects/:projectId/ga4/report', auth, c.report);

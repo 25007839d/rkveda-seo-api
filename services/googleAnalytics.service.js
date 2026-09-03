@@ -78,6 +78,16 @@ async function getConnection(projectId, userId) {
   return rows[0] || null;
 }
 
+
+async function disconnectConnection(projectId, userId) {
+  await ensureTable();
+  const connection = await getConnection(projectId, userId);
+  if (!connection) return { disconnected: true, projectId: Number(projectId), existed: false };
+  await db.execute('DELETE FROM google_analytics_connections WHERE project_id=?', [projectId]);
+  return { disconnected: true, projectId: Number(projectId), existed: true };
+}
+
+
 function clientFromConnection(connection) {
   const oauth2Client = createOAuthClient();
   oauth2Client.setCredentials({
@@ -204,4 +214,4 @@ function mapSummary(data) {
   return values;
 }
 
-module.exports = { SCOPES, ensureTable, getAuthorizationUrl, exchangeCode, saveConnection, getConnection, listProperties, selectProperty, runReport };
+module.exports = { SCOPES, ensureTable, getAuthorizationUrl, exchangeCode, saveConnection, getConnection, listProperties, selectProperty, disconnectConnection, runReport };

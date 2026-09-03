@@ -40,6 +40,17 @@ async function connect(req, res) {
   } catch (e) { return res.status(500).json({ success: false, message: e.message }); }
 }
 
+async function disconnect(req, res) {
+  try {
+    const projectId = req.params.projectId;
+    if (!(await projectOwned(projectId, req.user.userId))) return res.status(404).json({ success: false, message: 'Project not found' });
+    await ga4.disconnectConnection(projectId, req.user.userId);
+    return res.json({ success: true, message: 'Google Analytics 4 disconnected.' });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: e.message || 'Unable to disconnect Google Analytics 4' });
+  }
+}
+
 async function callback(req, res) {
   let projectId = null;
   try {
@@ -115,4 +126,4 @@ async function report(req, res) {
   } catch (e) { console.error('GA4 REPORT ERROR:', e); return res.status(500).json({ success: false, message: e.message || 'Unable to load GA4 data' }); }
 }
 
-module.exports = { connect, callback, status, properties, selectProperty, report };
+module.exports = { connect, callback, status, properties, selectProperty, report, disconnect };
