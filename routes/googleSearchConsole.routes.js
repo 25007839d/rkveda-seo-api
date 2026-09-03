@@ -7,7 +7,8 @@ const {
     getStatus,
     performance,
     syncHistory,
-    history
+    history,
+    disconnect
 } = require("../controllers/googleSearchConsole.controller");
 
 const router = express.Router();
@@ -15,6 +16,7 @@ const router = express.Router();
 // Project-scoped GSC operations require the logged-in user.
 router.get("/projects/:projectId/gsc/connect", authMiddleware, connectGoogle);
 router.get("/projects/:projectId/gsc/status", authMiddleware, getStatus);
+router.post("/projects/:projectId/gsc/disconnect", authMiddleware, disconnect);
 router.get("/projects/:projectId/gsc/performance", authMiddleware, performance);
 router.post("/projects/:projectId/gsc/history/sync", authMiddleware, syncHistory);
 router.get("/projects/:projectId/gsc/history", authMiddleware, history);
