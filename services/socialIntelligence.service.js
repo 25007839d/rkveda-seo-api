@@ -80,8 +80,8 @@ function authorizationUrl(platform, projectId, userId) {
 
   if (cfg.provider === 'meta') {
     const scopes = [
-      'pages_show_list','pages_read_engagement','read_insights',
-      'instagram_basic','instagram_manage_insights'
+      'pages_show_list','pages_read_engagement','pages_manage_posts','read_insights',
+      'instagram_basic','instagram_manage_insights','instagram_content_publish'
     ].join(',');
     const u = new URL(`https://www.facebook.com/${META_VERSION}/dialog/oauth`);
     u.searchParams.set('client_id', process.env.META_APP_ID);
