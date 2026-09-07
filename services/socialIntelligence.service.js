@@ -25,15 +25,35 @@ async function ensureTables() {
   ) ENGINE=InnoDB`);
 }
 
-function frontendUrl(projectId, params = {}) {
-  const base = process.env.FRONTEND_URL || 'http://localhost:5173';
+function allowedFrontendOrigins() {
+  const raw = process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:5173';
+  return raw.split(',').map(x => x.trim()).filter(Boolean).map(x => {
+    try { return new URL(x).origin; } catch (_) { return null; }
+  }).filter(Boolean);
+}
+
+function normalizeFrontendOrigin(origin) {
+  if (!origin) return null;
+  try {
+    const parsed = new URL(origin);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    return parsed.origin;
+  } catch (_) {
+    return null;
+  }
+}
+
+function frontendUrl(projectId, params = {}, preferredOrigin = null) {
+  const allowed = allowedFrontendOrigins();
+  const requested = normalizeFrontendOrigin(preferredOrigin);
+  const base = requested && allowed.includes(requested) ? requested : (allowed[0] || 'http://localhost:5173');
   const url = new URL(`/projects/${projectId}/seo/social`, base);
   Object.entries(params).forEach(([k,v]) => { if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v)); });
   return url.toString();
 }
 
-function state(projectId, userId, platform) {
-  const payload = Buffer.from(JSON.stringify({ projectId: String(projectId), userId: String(userId), platform, ts: Date.now(), nonce: crypto.randomBytes(16).toString('hex') })).toString('base64url');
+function state(projectId, userId, platform, frontendOrigin = null) {
+  const payload = Buffer.from(JSON.stringify({ projectId: String(projectId), userId: String(userId), platform, frontendOrigin: normalizeFrontendOrigin(frontendOrigin), ts: Date.now(), nonce: crypto.randomBytes(16).toString('hex') })).toString('base64url');
   const secret = process.env.JWT_SECRET || process.env.GOOGLE_CLIENT_SECRET || process.env.SOCIAL_OAUTH_SECRET;
   if (!secret) throw new Error('JWT_SECRET or SOCIAL_OAUTH_SECRET is required for social OAuth.');
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
@@ -72,23 +92,32 @@ function providerConfig(platform) {
   return configs[platform];
 }
 
-function authorizationUrl(platform, projectId, userId) {
+function authorizationUrl(platform, projectId, userId, frontendOrigin = null) {
   const cfg = providerConfig(platform);
   if (!cfg) throw new Error('Invalid platform');
   if (!cfg.configured) throw new Error(`${cfg.label} API is not configured. Add the provider OAuth environment variables first.`);
-  const s = state(projectId, userId, platform);
+  const s = state(projectId, userId, platform, frontendOrigin);
 
   if (cfg.provider === 'meta') {
-    const scopes = [
-      'pages_show_list','pages_read_engagement','pages_manage_posts','read_insights',
-      'instagram_basic','instagram_manage_insights','instagram_content_publish'
-    ].join(',');
     const u = new URL(`https://www.facebook.com/${META_VERSION}/dialog/oauth`);
     u.searchParams.set('client_id', process.env.META_APP_ID);
     u.searchParams.set('redirect_uri', process.env.META_REDIRECT_URI);
     u.searchParams.set('state', s);
     u.searchParams.set('response_type', 'code');
-    u.searchParams.set('scope', scopes);
+
+    // Meta's current Facebook Login for Business flow uses a Login Configuration
+    // ID. Keep the older scope-based flow as a compatibility fallback so existing
+    // deployments are not broken while the Meta app is being upgraded.
+    if (process.env.META_LOGIN_CONFIG_ID) {
+      u.searchParams.set('config_id', process.env.META_LOGIN_CONFIG_ID);
+      u.searchParams.set('override_default_response_type', 'true');
+    } else {
+      const scopes = [
+        'pages_show_list','pages_read_engagement','pages_manage_posts','read_insights',
+        'instagram_basic','instagram_manage_insights','instagram_content_publish'
+      ].join(',');
+      u.searchParams.set('scope', scopes);
+    }
     return u.toString();
   }
 
